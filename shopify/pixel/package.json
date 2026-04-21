@@ -1,0 +1,16 @@
+{
+  "name": "trustdata-shopify-pixels",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "shopify app dev",
+    "deploy": "shopify app deploy"
+  },
+  "dependencies": {
+    "@trustdata/tracking-core": "file:../core"
+  },
+  "devDependencies": {
+    "@shopify/cli": "^3.75.0",
+    "@shopify/web-pixels-extension": "^1.0.0"
+  }
+}

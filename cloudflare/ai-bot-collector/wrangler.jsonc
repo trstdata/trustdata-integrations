@@ -1,0 +1,37 @@
+// TrustData AI Bot Collector — customer-deployed Cloudflare Worker.
+//
+// Customers clone this directory, set their route pattern + zone_name to their
+// own domain, configure TRUSTDATA_ATTRIBUTION_ID, add TRUSTDATA_API_KEY via
+// `wrangler secret put`, then `wrangler deploy`. That's it — every request
+// their zone serves is forwarded to TrustData's ingest endpoint, where the Go
+// server classifies AI-bot visits, AI-referral visits, and drops everything else.
+//
+// The Worker also intercepts /.well-known/webmcp.json on the customer's zone
+// and serves TrustData's signed WebMCP manifest, enabling AI agents to
+// discover the site's tool surface without any extra work on the customer side.
+//
+// Replace "example.com" in `route` before deploying. The KV binding is
+// optional — remove it to disable manifest caching (the Worker will fetch
+// upstream on every request instead).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "trustdata-ai-bot-collector",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+  "observability": { "enabled": true },
+  "route": {
+    "pattern": "example.com/*",
+    "zone_name": "example.com"
+  },
+  "vars": {
+    "TRUSTDATA_INGEST_URL": "https://t.trustdata.tech/v1/logs/cloudflare_worker",
+    "TRUSTDATA_MANIFEST_URL": "https://app.trustdata.tech/api/v1/webmcp",
+    "TRUSTDATA_ATTRIBUTION_ID": ""
+  },
+  "kv_namespaces": [
+    {
+      "binding": "WEBMCP_CACHE",
+      "id": "REPLACE_ME_WITH_KV_NAMESPACE_ID"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+# TrustData Web Pixel Extension
+# https://shopify.dev/docs/apps/build/marketing-analytics/build-web-pixels
+
+api_version = "2024-01"
+uid = "f79abb78-104e-650c-4879-4f70f209a12901647b31"
+type = "web_pixel_extension"
+name = "trustdata-pixel"
+runtime_context = "strict"
+
+[customer_privacy]
+analytics = false
+marketing = false
+preferences = false
+sale_of_data = "disabled"
+
+[settings]
+type = "object"
+
+[settings.fields.serverUrl]
+name = "Server URL"
+description = "Your TrustData event server URL"
+type = "single_line_text_field"
+validations = [{ name = "min", value = "1" }]
+
+[settings.fields.attributionId]
+name = "Attribution ID"
+description = "Your TrustData attribution ID (from your dashboard)"
+type = "single_line_text_field"
+validations = [{ name = "min", value = "1" }]
+
+[settings.fields.enableDebug]
+name = "Debug Mode"
+description = "Set to 'true' to enable console logging"
+type = "single_line_text_field"

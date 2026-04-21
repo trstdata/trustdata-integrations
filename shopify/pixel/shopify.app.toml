@@ -1,0 +1,38 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "48c945c15ece1a6004d0cbe7bf7d56a1"
+name = "TrustData Analytics"
+application_url = "https://app.trustdata.tech/shopify/app/"
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2026-01"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/paid", "orders/cancelled", "orders/updated" ]
+  uri = "https://t.trustdata.tech/webhooks/shopify/orders"
+
+  [[webhooks.subscriptions]]
+  topics = [ "customers/create" ]
+  uri = "https://t.trustdata.tech/webhooks/shopify/customers"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "https://app.trustdata.tech/shopify/webhooks/app"
+
+  [[webhooks.subscriptions]]
+  uri = "https://app.trustdata.tech/shopify/webhooks/compliance"
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_customer_events,read_customers,read_orders,write_pixels"
+
+[auth]
+redirect_urls = [
+  "https://app.trustdata.tech/oauth/callback/",
+  "http://localhost:8000/oauth/callback/"
+]
