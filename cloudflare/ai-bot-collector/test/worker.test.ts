@@ -6,13 +6,23 @@
  * early-return.
  */
 
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import {
   forwardLog,
+  classifyRequest,
+  getBotLists,
+  anonymizeIp,
+  refererHost,
+  parseSampleRate,
   serveWebmcpManifest,
   buildManifestUrl,
+  DEFAULT_SAMPLE_RATE,
+  BOTLIST_CACHE_KEY,
+  BOTLIST_KV_TTL_SECONDS,
+  EMBEDDED_BOT_LISTS,
   WEBMCP_CACHE_TTL_SECONDS,
   WEBMCP_PATH,
+  _resetBotListCache,
   type Env,
 } from "../src/index";
 
@@ -92,10 +102,294 @@ describe("forwardLog", () => {
 
   it("swallows ingest failures so the customer response is unaffected", async () => {
     fetchSpy.mockRejectedValueOnce(new Error("network down"));
-    const req = buildRequest("https://example.com/");
+    // Bot UA so the entry is deterministically forwarded (no sampling roll).
+    const req = buildRequest("https://example.com/", { "user-agent": "GPTBot/1.0" });
 
     // Should not throw.
     await expect(forwardLog(req, buildResponse(), baseEnv)).resolves.toBeUndefined();
+  });
+
+  describe("edge filtering & sampling", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("forwards AI-bot requests in full fidelity", async () => {
+      const req = buildRequest("https://example.com/robots.txt?ref=abc", {
+        "user-agent": "Mozilla/5.0 (compatible; ClaudeBot/1.0)",
+        "cf-connecting-ip": "1.2.3.4",
+      });
+
+      await forwardLog(req, buildResponse(), baseEnv);
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const log = JSON.parse(
+        (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+      )[0];
+      expect(log.ip).toBe("1.2.3.4");
+      expect(log.query_params).toEqual({ ref: "abc" });
+      expect(log.sample_rate).toBeUndefined();
+    });
+
+    it("drops non-AI traffic when the sample roll misses", async () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.99);
+      const req = buildRequest("https://example.com/pricing", {
+        "user-agent": "Mozilla/5.0",
+        "cf-connecting-ip": "1.2.3.4",
+      });
+
+      await forwardLog(req, buildResponse(), baseEnv);
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("forwards a sampled non-AI request anonymized and weighted", async () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.001);
+      const req = buildRequest(
+        "https://example.com/account?token=s3cret&email=a@b.c",
+        {
+          "user-agent": "Mozilla/5.0",
+          "cf-connecting-ip": "203.0.113.77",
+          referer: "https://news.ycombinator.com/item?id=1",
+        },
+      );
+
+      await forwardLog(req, buildResponse(), baseEnv);
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const log = JSON.parse(
+        (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+      )[0];
+      expect(log.sample_rate).toBe(DEFAULT_SAMPLE_RATE);
+      expect(log.ip).toBe("203.0.113.0");
+      expect(log.query_params).toEqual({});
+      expect(log.referer).toBe("news.ycombinator.com");
+      expect(log.user_agent).toBe("Mozilla/5.0"); // kept — needed for bot discovery
+      expect(log.pathname).toBe("/account");
+    });
+
+    it("honors TRUSTDATA_SAMPLE_RATE=0 (no sampling at all)", async () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.0);
+      const req = buildRequest("https://example.com/", { "user-agent": "Mozilla/5.0" });
+
+      await forwardLog(req, buildResponse(), {
+        ...baseEnv,
+        TRUSTDATA_SAMPLE_RATE: "0",
+      });
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("forwards everything unfiltered when TRUSTDATA_FORWARD_ALL=true", async () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.99);
+      const req = buildRequest("https://example.com/page?q=1", {
+        "user-agent": "Mozilla/5.0",
+        "cf-connecting-ip": "1.2.3.4",
+      });
+
+      await forwardLog(req, buildResponse(), {
+        ...baseEnv,
+        TRUSTDATA_FORWARD_ALL: "true",
+      });
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const log = JSON.parse(
+        (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+      )[0];
+      expect(log.ip).toBe("1.2.3.4");
+      expect(log.query_params).toEqual({ q: "1" });
+      expect(log.sample_rate).toBeUndefined();
+    });
+  });
+});
+
+describe("classifyRequest", () => {
+  it("matches known AI bot user agents as substrings", () => {
+    expect(classifyRequest("Mozilla/5.0 (compatible; GPTBot/1.2)", null)).toBe("bot");
+    expect(classifyRequest("PerplexityBot/1.0", null)).toBe("bot");
+    expect(classifyRequest("Bytespider; spider-feedback@bytedance.com", null)).toBe("bot");
+  });
+
+  it("matches user-triggered fetchers (AI Visits)", () => {
+    expect(classifyRequest("Mozilla/5.0 AppleWebKit/537.36; compatible; ChatGPT-User/1.0", null)).toBe("bot");
+    expect(classifyRequest("Mozilla/5.0 (compatible; Claude-User/1.0)", null)).toBe("bot");
+    expect(classifyRequest("Mozilla/5.0 (compatible; Perplexity-User/1.0)", null)).toBe("bot");
+    expect(classifyRequest("MistralAI-User/1.0", null)).toBe("bot");
+  });
+
+  it("matches case-insensitively (Meta ships lowercase UAs)", () => {
+    expect(classifyRequest("meta-externalagent/1.1 (+https://developers.facebook.com/...)", null)).toBe("bot");
+    expect(classifyRequest("meta-externalfetcher/1.1", null)).toBe("bot");
+    expect(classifyRequest("MOZILLA/5.0 (COMPATIBLE; GPTBOT/1.0)", null)).toBe("bot");
+  });
+
+  it("matches AI-engine referrers, stripping www. and subdomains", () => {
+    expect(classifyRequest("Mozilla/5.0", "https://chat.openai.com/")).toBe("referral");
+    expect(classifyRequest("Mozilla/5.0", "https://www.perplexity.ai/search?q=x")).toBe("referral");
+    expect(classifyRequest("Mozilla/5.0", "https://fr.claude.ai/chat/123")).toBe("referral");
+  });
+
+  it("prefers bot over referral when both match", () => {
+    expect(classifyRequest("GPTBot/1.0", "https://chatgpt.com/")).toBe("bot");
+  });
+
+  it("returns null for regular browsers and non-AI referrers", () => {
+    expect(classifyRequest("Mozilla/5.0 (Macintosh)", "https://google.com/")).toBeNull();
+    expect(classifyRequest("Mozilla/5.0 (Macintosh)", null)).toBeNull();
+    expect(classifyRequest(null, null)).toBeNull();
+  });
+
+  it("does not over-match lookalike domains", () => {
+    // "notclaude.ai" must not match "claude.ai" — label-boundary stripping only.
+    expect(classifyRequest("Mozilla/5.0", "https://notclaude.ai/")).toBeNull();
+  });
+});
+
+describe("anonymizeIp", () => {
+  it("zeroes the last IPv4 octet (/24)", () => {
+    expect(anonymizeIp("203.0.113.77")).toBe("203.0.113.0");
+  });
+
+  it("keeps the first three IPv6 groups (/48)", () => {
+    expect(anonymizeIp("2001:db8:85a3:8d3:1319:8a2e:370:7348")).toBe("2001:db8:85a3::");
+  });
+
+  it("returns null for null or malformed input", () => {
+    expect(anonymizeIp(null)).toBeNull();
+    expect(anonymizeIp("not-an-ip")).toBeNull();
+  });
+});
+
+describe("refererHost", () => {
+  it("extracts the lowercased hostname from a URL", () => {
+    expect(refererHost("https://News.Ycombinator.com/item?id=1")).toBe("news.ycombinator.com");
+  });
+
+  it("handles bare hosts and null", () => {
+    expect(refererHost("example.com/path")).toBe("example.com");
+    expect(refererHost(null)).toBeNull();
+    expect(refererHost("")).toBeNull();
+  });
+});
+
+describe("parseSampleRate", () => {
+  it("defaults when unset, empty, or invalid", () => {
+    expect(parseSampleRate(undefined)).toBe(DEFAULT_SAMPLE_RATE);
+    expect(parseSampleRate("")).toBe(DEFAULT_SAMPLE_RATE);
+    expect(parseSampleRate("abc")).toBe(DEFAULT_SAMPLE_RATE);
+    expect(parseSampleRate("-1")).toBe(DEFAULT_SAMPLE_RATE);
+  });
+
+  it("parses explicit values and clamps to 1", () => {
+    expect(parseSampleRate("0")).toBe(0);
+    expect(parseSampleRate("0.05")).toBe(0.05);
+    expect(parseSampleRate("5")).toBe(1);
+  });
+});
+
+describe("getBotLists (runtime sync)", () => {
+  const configBody = JSON.stringify({
+    version: 1,
+    bot_patterns: [
+      { pattern: "gptbot", bot_name: "GPTBot", intent: "training", engine: "openai" },
+      { pattern: "newbot9000", bot_name: "NewBot9000", intent: "on_demand", engine: "unknown" },
+    ],
+    ai_referrer_domains: ["chatgpt.com", "newengine.ai"],
+  });
+
+  const syncEnv: Env = {
+    TRUSTDATA_INGEST_URL: "https://ingest.test/v1/logs/cloudflare_worker",
+    TRUSTDATA_API_KEY: "secret",
+    TRUSTDATA_ATTRIBUTION_ID: "prop-1",
+    TRUSTDATA_BOTLIST_URL: "https://t.test/v1/config/ai-bots",
+  };
+
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  function buildKV(store = new Map<string, string>()) {
+    const kv = {
+      get: vi.fn(async (key: string) => store.get(key) ?? null),
+      put: vi.fn(async (key: string, value: string) => {
+        store.set(key, value);
+      }),
+      delete: vi.fn(),
+      list: vi.fn(),
+      getWithMetadata: vi.fn(),
+    };
+    return { kv: kv as unknown as KVNamespace, store, spies: kv };
+  }
+
+  beforeEach(() => {
+    _resetBotListCache();
+    fetchSpy = vi.fn().mockResolvedValue(new Response(configBody, { status: 200 }));
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+  });
+
+  it("returns the embedded lists when no botlist URL is configured", async () => {
+    const lists = await getBotLists({ ...syncEnv, TRUSTDATA_BOTLIST_URL: "" });
+    expect(lists).toBe(EMBEDDED_BOT_LISTS);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("fetches the canonical list, uses it, and stores it in KV", async () => {
+    const { kv, spies } = buildKV();
+    const lists = await getBotLists({ ...syncEnv, WEBMCP_CACHE: kv });
+
+    expect(lists.patterns).toContain("newbot9000");
+    expect(classifyRequest("NewBot9000/1.0", null, lists)).toBe("bot");
+    expect(classifyRequest("Mozilla/5.0", "https://newengine.ai/x", lists)).toBe("referral");
+    expect(spies.put).toHaveBeenCalledWith(BOTLIST_CACHE_KEY, configBody, {
+      expirationTtl: BOTLIST_KV_TTL_SECONDS,
+    });
+  });
+
+  it("serves from KV without hitting the upstream", async () => {
+    const { kv } = buildKV(new Map([[BOTLIST_CACHE_KEY, configBody]]));
+    const lists = await getBotLists({ ...syncEnv, WEBMCP_CACHE: kv });
+
+    expect(lists.patterns).toContain("newbot9000");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("memoizes per isolate (one fetch for many requests)", async () => {
+    await getBotLists(syncEnv);
+    await getBotLists(syncEnv);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to the embedded lists when the upstream fails", async () => {
+    fetchSpy.mockRejectedValueOnce(new Error("offline"));
+    const lists = await getBotLists(syncEnv);
+
+    expect(lists).toBe(EMBEDDED_BOT_LISTS);
+    expect(classifyRequest("GPTBot/1.0", null, lists)).toBe("bot");
+    // Failure is memoized too — no hammering a broken upstream.
+    await getBotLists(syncEnv);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("falls back when the upstream returns an invalid shape", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response('{"bot_patterns": []}', { status: 200 }));
+    const lists = await getBotLists(syncEnv);
+    expect(lists).toBe(EMBEDDED_BOT_LISTS);
+  });
+
+  it("forwards a bot only present in the synced list (end-to-end)", async () => {
+    const req = new Request("https://example.com/page", {
+      method: "GET",
+      headers: { "user-agent": "NewBot9000/1.0" },
+    });
+    const resp = new Response("ok", { status: 200 });
+
+    await forwardLog(req, resp, syncEnv);
+
+    // First call fetched the list, second forwarded the matched entry.
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const [ingestUrl, init] = fetchSpy.mock.calls[1] as [string, RequestInit];
+    expect(ingestUrl).toBe(syncEnv.TRUSTDATA_INGEST_URL);
+    const log = JSON.parse(init.body as string)[0];
+    expect(log.user_agent).toBe("NewBot9000/1.0");
+    expect(log.sample_rate).toBeUndefined();
   });
 });
 
