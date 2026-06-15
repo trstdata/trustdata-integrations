@@ -43,8 +43,8 @@ agreement with TrustData, since full traffic includes visitor personal data).
 
 The Deploy to Cloudflare button walks you through the whole setup in your browser — no terminal, no `wrangler login`, no `npm install`. You'll need:
 
-1. A TrustData account → issue an ingest key in `/organizations/<org_id>/#integrations` (provider: Cloudflare). Copy the `td_live_…` value.
-2. Your TrustData property UUID (visible on the property page).
+1. A TrustData account → issue an ingest key in `/organizations/<org_id>/#integrations` (provider: Cloudflare). Copy the `td_cf_…` value.
+2. Your TrustData attribution ID (visible on the property page).
 3. A Cloudflare account with a zone you control.
 
 The button will:
@@ -78,12 +78,12 @@ Cloudflare **Logpush** can stream HTTP request logs directly to TrustData with *
 
 Setup (~5 min, all in the Cloudflare dashboard):
 
-1. Issue a TrustData ingest key in `/organizations/<org_id>/#integrations` (provider: Cloudflare). Copy the `td_live_…` value.
+1. Issue a TrustData ingest key in `/organizations/<org_id>/#integrations` (provider: Cloudflare). Copy the `td_cf_…` value.
 2. Cloudflare dashboard → your zone → **Analytics & Logs → Logpush → Create job**.
 3. **Destination type:** HTTP destination.
 4. **Destination URL:**
    ```
-   https://t.trustdata.tech/v1/logs/cloudflare_logpush?header_X-API-Key=td_live_YOUR_KEY&tags=attribution_id=YOUR_PROPERTY_UUID
+   https://t.trustdata.tech/v1/logs/cloudflare_logpush?header_X-API-Key=td_cf_YOUR_KEY&tags=attribution_id=YOUR_ATTRIBUTION_ID
    ```
 5. **Dataset:** HTTP requests.
 6. **Fields:** Push all logs, or filter to `EdgeStartTimestamp`, `ClientRequestUserAgent`, `ClientRequestReferer`, `ClientRequestPath`, `ClientRequestHost`, `EdgeResponseStatus` to reduce volume.
@@ -110,7 +110,7 @@ npx wrangler secret put TRUSTDATA_API_KEY
 | Variable | Type | Purpose |
 |----------|------|---------|
 | `TRUSTDATA_INGEST_URL` | var | HTTPS endpoint (pre-filled to `https://t.trustdata.tech/v1/logs/cloudflare_worker`) |
-| `TRUSTDATA_ATTRIBUTION_ID` | var | Your TrustData property UUID — tags events + keys the WebMCP manifest |
+| `TRUSTDATA_ATTRIBUTION_ID` | var | Your TrustData attribution ID — tags events + keys the WebMCP manifest |
 | `TRUSTDATA_API_KEY` | var (or secret post-deploy) | Auth key issued on `/organizations/<org_id>/#integrations` → Cloudflare. The Deploy button uses a var so it can prompt for it; convert to a secret after deploy for hardening (see above). |
 | `TRUSTDATA_MANIFEST_URL` | var *(optional)* | Base URL for the WebMCP manifest API. Pre-filled to `https://app.trustdata.tech/api/v1/webmcp` — leave blank to disable manifest hosting |
 | `TRUSTDATA_SAMPLE_RATE` | var *(optional)* | Fraction of non-AI traffic forwarded as anonymized samples. Pre-filled to `0.02`; `0` disables sampling |

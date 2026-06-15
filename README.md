@@ -22,7 +22,7 @@ You need a TrustData account and at least one **property** (attribution ID) to s
 Each integration takes:
 
 - `TRUSTDATA_API_KEY` — from **Settings → Data Sources** in the dashboard
-- `TRUSTDATA_ATTRIBUTION_ID` — the UUID of the property you're sending data for
+- `TRUSTDATA_ATTRIBUTION_ID` — your TrustData attribution ID for the property you're sending data for
 
 ## Releases
 
