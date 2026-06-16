@@ -718,3 +718,115 @@ describe("web bot auth signature verification", () => {
     expect(parsed?.alg).toBe("ed25519");
   });
 });
+
+// End-to-end through forwardLog: proves the actual wiring (classify → verify →
+// payload), not just the helpers. Routes fetch by URL so one spy serves the
+// ingest POST, the vendor range lists, and the key directory.
+describe("forwardLog bot verification (integration)", () => {
+  const env: Env = {
+    TRUSTDATA_INGEST_URL: "https://ingest.test/v1/logs/cloudflare_worker",
+    TRUSTDATA_API_KEY: "secret",
+    TRUSTDATA_ATTRIBUTION_ID: "prop-1",
+  };
+
+  afterEach(() => {
+    _resetBotIPCache();
+    vi.unstubAllGlobals();
+  });
+
+  function ingestLog(fetchSpy: ReturnType<typeof vi.fn>) {
+    const call = fetchSpy.mock.calls.find((c) => (c[1] as RequestInit)?.body !== undefined);
+    expect(call).toBeDefined();
+    return JSON.parse((call![1] as RequestInit).body as string)[0];
+  }
+
+  function routeFetch(routes: { ranges?: unknown; directory?: unknown }) {
+    return vi.fn().mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes("ingest.test")) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (u.includes("dir.test")) {
+        return Promise.resolve(
+          new Response(JSON.stringify(routes.directory ?? { keys: [] }), { status: 200 }),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify(routes.ranges ?? { prefixes: [] }), { status: 200 }),
+      );
+    });
+  }
+
+  it("edge CIDR: a verified IP is flagged and the raw IP is dropped", async () => {
+    const fetchSpy = routeFetch({ ranges: { prefixes: [{ ipv4Prefix: "203.0.113.0/24" }] } });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const req = new Request("https://example.com/robots.txt", {
+      headers: { "user-agent": "GPTBot/1.0", "cf-connecting-ip": "203.0.113.50" },
+    });
+    await forwardLog(req, new Response("ok"), env);
+
+    const log = ingestLog(fetchSpy);
+    expect(log.verified).toBe(true);
+    expect(log.verified_by).toBe("edge_cidr");
+    expect(log.ip).toBeNull();
+  });
+
+  it("edge CIDR: a spoofed IP is marked unverified", async () => {
+    const fetchSpy = routeFetch({ ranges: { prefixes: [{ ipv4Prefix: "203.0.113.0/24" }] } });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const req = new Request("https://example.com/robots.txt", {
+      headers: { "user-agent": "GPTBot/1.0", "cf-connecting-ip": "198.51.100.7" },
+    });
+    await forwardLog(req, new Response("ok"), env);
+
+    const log = ingestLog(fetchSpy);
+    expect(log.verified).toBe(false);
+    expect(log.verified_by).toBe("edge_cidr");
+  });
+
+  it("signature wins over CIDR: a valid signature → verified_by=signature", async () => {
+    const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
+      "sign",
+      "verify",
+    ])) as CryptoKeyPair;
+    const jwk = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as JsonWebKey & {
+      kty: string;
+      crv: string;
+      x: string;
+    };
+    const keyid = await jwkThumbprint({ kty: jwk.kty, crv: jwk.crv, x: jwk.x });
+    const rawParams = `("@authority" "@path");created=1700000000;keyid="${keyid}";alg="ed25519"`;
+    const base = buildSignatureBase(
+      { method: "GET", authority: "example.com", path: "/robots.txt", headers: new Headers() },
+      ["@authority", "@path"],
+      rawParams,
+    )!;
+    const sigBytes = new Uint8Array(
+      await crypto.subtle.sign({ name: "Ed25519" }, pair.privateKey, new TextEncoder().encode(base)),
+    );
+    let bin = "";
+    for (const b of sigBytes) bin += String.fromCharCode(b);
+
+    // Vendor ranges deliberately empty: if the signature path didn't short-circuit,
+    // CIDR would yield no verdict, so verified_by=signature proves precedence.
+    const fetchSpy = routeFetch({ directory: { keys: [jwk] }, ranges: { prefixes: [] } });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const req = new Request("https://example.com/robots.txt", {
+      headers: {
+        "user-agent": "GPTBot/1.0",
+        signature: `sig1=:${btoa(bin)}:`,
+        "signature-input": `sig1=${rawParams}`,
+        "signature-agent": '"https://dir.test/keys"',
+      },
+    });
+    await forwardLog(req, new Response("ok"), env);
+
+    const log = ingestLog(fetchSpy);
+    expect(log.verified).toBe(true);
+    expect(log.verified_by).toBe("signature");
+    expect(log.ip).toBeNull();
+  });
+});
