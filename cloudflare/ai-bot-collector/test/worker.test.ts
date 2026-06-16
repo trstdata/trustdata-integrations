@@ -23,6 +23,16 @@ import {
   WEBMCP_CACHE_TTL_SECONDS,
   WEBMCP_PATH,
   _resetBotListCache,
+  ipToBigInt,
+  parseCidr,
+  ipInRanges,
+  getBotIPRanges,
+  _resetBotIPCache,
+  verifySignature,
+  buildSignatureBase,
+  parseSignatureInput,
+  jwkThumbprint,
+  type CidrRange,
   type Env,
 } from "../src/index";
 
@@ -79,7 +89,7 @@ describe("forwardLog", () => {
     expect(log.query_params).toEqual({ utm_source: "chatgpt" });
     expect(log.user_agent).toBe("Mozilla/5.0");
     expect(log.referer).toBe("https://chat.openai.com/");
-    expect(log.ip).toBe("1.2.3.4");
+    expect(log.ip).toBeNull(); // AI referral — IP not forwarded
     expect(log.status).toBe(200);
     expect(typeof log.timestamp).toBe("number");
   });
@@ -112,9 +122,10 @@ describe("forwardLog", () => {
   describe("edge filtering & sampling", () => {
     afterEach(() => {
       vi.restoreAllMocks();
+      _resetBotIPCache();
     });
 
-    it("forwards AI-bot requests in full fidelity", async () => {
+    it("forwards AI-bot requests but verifies and drops the IP at the edge", async () => {
       const req = buildRequest("https://example.com/robots.txt?ref=abc", {
         "user-agent": "Mozilla/5.0 (compatible; ClaudeBot/1.0)",
         "cf-connecting-ip": "1.2.3.4",
@@ -122,11 +133,13 @@ describe("forwardLog", () => {
 
       await forwardLog(req, buildResponse(), baseEnv);
 
-      expect(fetchSpy).toHaveBeenCalledOnce();
-      const log = JSON.parse(
-        (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
-      )[0];
-      expect(log.ip).toBe("1.2.3.4");
+      // The bot branch also fetches vendor IP ranges; find the ingest POST.
+      const ingest = fetchSpy.mock.calls.find(
+        (c) => (c[1] as RequestInit)?.body !== undefined,
+      );
+      expect(ingest).toBeDefined();
+      const log = JSON.parse((ingest![1] as RequestInit).body as string)[0];
+      expect(log.ip).toBeNull(); // verified at the edge — raw IP never leaves the zone
       expect(log.query_params).toEqual({ ref: "abc" });
       expect(log.sample_rate).toBeUndefined();
     });
@@ -321,6 +334,7 @@ describe("getBotLists (runtime sync)", () => {
 
   beforeEach(() => {
     _resetBotListCache();
+    _resetBotIPCache();
     fetchSpy = vi.fn().mockResolvedValue(new Response(configBody, { status: 200 }));
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
   });
@@ -383,11 +397,13 @@ describe("getBotLists (runtime sync)", () => {
 
     await forwardLog(req, resp, syncEnv);
 
-    // First call fetched the list, second forwarded the matched entry.
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    const [ingestUrl, init] = fetchSpy.mock.calls[1] as [string, RequestInit];
-    expect(ingestUrl).toBe(syncEnv.TRUSTDATA_INGEST_URL);
-    const log = JSON.parse(init.body as string)[0];
+    // The bot branch also fetches vendor IP ranges, so locate the ingest POST
+    // by URL rather than by call index.
+    const ingest = fetchSpy.mock.calls.find(
+      (c) => c[0] === syncEnv.TRUSTDATA_INGEST_URL,
+    );
+    expect(ingest).toBeDefined();
+    const log = JSON.parse((ingest![1] as RequestInit).body as string)[0];
     expect(log.user_agent).toBe("NewBot9000/1.0");
     expect(log.sample_rate).toBeUndefined();
   });
@@ -566,5 +582,139 @@ describe("serveWebmcpManifest", () => {
     expect(resp.status).toBe(200);
     expect(resp.headers.get("X-TrustData-Cache")).toBe("miss");
     expect(await resp.text()).toBe(signedManifestBody);
+  });
+});
+
+describe("edge IP verification", () => {
+  afterEach(() => {
+    _resetBotIPCache();
+    vi.unstubAllGlobals();
+  });
+
+  it("parses IPv4 and IPv6 to integers, rejecting junk", () => {
+    expect(ipToBigInt("203.0.113.7")?.v6).toBe(false);
+    expect(ipToBigInt("2001:db8::1")?.v6).toBe(true);
+    expect(ipToBigInt("203.0.113")).toBeNull();
+    expect(ipToBigInt("999.0.0.1")).toBeNull();
+    expect(ipToBigInt("not-an-ip")).toBeNull();
+    expect(ipToBigInt("2001::db8::1")).toBeNull(); // two "::"
+  });
+
+  it("matches IPv4 and IPv6 CIDR ranges", () => {
+    const ranges = [parseCidr("203.0.113.0/24"), parseCidr("2001:db8::/32")].filter(
+      (r): r is CidrRange => r !== null,
+    );
+    expect(ipInRanges("203.0.113.50", ranges)).toBe(true);
+    expect(ipInRanges("2001:db8::dead", ranges)).toBe(true);
+    expect(ipInRanges("198.51.100.4", ranges)).toBe(false);
+    expect(ipInRanges("2001:dead::1", ranges)).toBe(false);
+    expect(ipInRanges(null, ranges)).toBe(false);
+  });
+
+  it("rejects malformed CIDRs", () => {
+    expect(parseCidr("203.0.113.0")).toBeNull(); // no /bits
+    expect(parseCidr("203.0.113.0/33")).toBeNull(); // out of range
+    expect(parseCidr("garbage/24")).toBeNull();
+  });
+
+  it("getBotIPRanges fetches and parses vendor prefix lists", async () => {
+    const fetchSpy = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ prefixes: [{ ipv4Prefix: "203.0.113.0/24" }, { ipv6Prefix: "2001:db8::/32" }] }),
+          { status: 200 },
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const ranges = await getBotIPRanges({} as Env);
+    expect(ranges.length).toBeGreaterThan(0);
+    expect(ipInRanges("203.0.113.9", ranges)).toBe(true);
+  });
+});
+
+describe("web bot auth signature verification", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Build a signed request + a key directory that serves the matching JWK.
+  async function buildSigned(opts: { path?: string; tamperPath?: string } = {}) {
+    const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
+      "sign",
+      "verify",
+    ])) as CryptoKeyPair;
+    const pubJwk = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as JsonWebKey & {
+      kty: string;
+      crv: string;
+      x: string;
+    };
+    const keyid = await jwkThumbprint({ kty: pubJwk.kty, crv: pubJwk.crv, x: pubJwk.x });
+
+    const path = opts.path ?? "/robots.txt";
+    const rawParams = `("@authority" "@path");created=1700000000;keyid="${keyid}";alg="ed25519"`;
+    const base = buildSignatureBase(
+      { method: "GET", authority: "example.com", path, headers: new Headers() },
+      ["@authority", "@path"],
+      rawParams,
+    )!;
+    // Pin the serialization to the RFC 9421 shape.
+    expect(base).toBe(
+      `"@authority": example.com\n"@path": ${path}\n"@signature-params": ${rawParams}`,
+    );
+
+    const sigBytes = new Uint8Array(
+      await crypto.subtle.sign({ name: "Ed25519" }, pair.privateKey, new TextEncoder().encode(base)),
+    );
+    let bin = "";
+    for (const b of sigBytes) bin += String.fromCharCode(b);
+    const sigB64 = btoa(bin);
+
+    const req = new Request(`https://example.com${opts.tamperPath ?? path}`, {
+      method: "GET",
+      headers: {
+        signature: `sig1=:${sigB64}:`,
+        "signature-input": `sig1=${rawParams}`,
+        "signature-agent": '"https://dir.test/keys"',
+      },
+    });
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ keys: [pubJwk] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    return req;
+  }
+
+  it("verifies a valid Ed25519 signature against the key directory", async () => {
+    const req = await buildSigned();
+    expect(await verifySignature(req, {} as Env)).toBe("verified");
+  });
+
+  it("rejects a signature when the request path was tampered", async () => {
+    // Sign over /robots.txt but send /admin → base mismatch → bad signature.
+    const req = await buildSigned({ path: "/robots.txt", tamperPath: "/admin" });
+    expect(await verifySignature(req, {} as Env)).toBe("unverified");
+  });
+
+  it("returns unknown when there is no signature", async () => {
+    const req = new Request("https://example.com/robots.txt", { method: "GET" });
+    expect(await verifySignature(req, {} as Env)).toBe("unknown");
+  });
+
+  it("returns unknown when the key directory has no matching key", async () => {
+    const req = await buildSigned();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ keys: [] }), { status: 200 })),
+    );
+    expect(await verifySignature(req, {} as Env)).toBe("unknown");
+  });
+
+  it("parses a Signature-Input header", () => {
+    const parsed = parseSignatureInput('sig1=("@authority" "@path");keyid="abc";alg="ed25519"');
+    expect(parsed?.covered).toEqual(["@authority", "@path"]);
+    expect(parsed?.keyid).toBe("abc");
+    expect(parsed?.alg).toBe("ed25519");
   });
 });
