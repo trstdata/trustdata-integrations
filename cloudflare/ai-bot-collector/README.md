@@ -53,24 +53,45 @@ The button will:
 - Auto-provision the KV namespace
 - Deploy the Worker
 
-### After deploy: configure the Worker route
+> ## ⚠️ Required after deploy: add your route
+>
+> **The Deploy button does NOT route the Worker to your site.** Cloudflare's deploy
+> flow can't set up routes — it never asks which zone you own — so a freshly deployed
+> Worker is live but **captures nothing**: no AI bots reach it until you add a route.
+> (Out of the box it only answers at its `*.workers.dev` URL, which your visitors and
+> crawlers never hit.)
+>
+> In the Cloudflare dashboard:
+> 1. **Workers & Pages → `trustdata-ai-bot-collector` → Settings → Domains & Routes → Add route**
+> 2. Pick your zone (`yourdomain.com`)
+> 3. Pattern: `*.yourdomain.com/*` (catches subdomains too) — adjust to your traffic shape
+>
+> Then the Worker wraps every request your zone serves and fires AI-bot logs to TrustData,
+> fire-and-forget. **Tip (Git-connected / button deploys only):** to keep the route across
+> redeploys, add a `routes` block with your own `zone_name` to your fork's `wrangler.jsonc`.
 
-The Worker isn't intercepting traffic yet — it's deployed but unrouted. In your Cloudflare dashboard:
+### API key is a secret by default
 
-1. **Workers & Pages → `trustdata-ai-bot-collector` → Settings → Triggers → Add Custom Domain or Route**
-2. Pick your zone (`yourdomain.com`)
-3. Pattern: `*.yourdomain.com/*` (catches subdomains too) — adjust to your traffic shape
+`TRUSTDATA_API_KEY` is declared in [`.dev.vars.example`](.dev.vars.example), not in
+`wrangler.jsonc`'s `vars` block — so the Deploy button prompts for it and stores it
+as an **encrypted secret** (write-only, hidden from the dashboard), never plaintext.
 
-The Worker now wraps every request your zone serves and fires AI-bot logs to TrustData fire-and-forget.
+> **Deployed before this change?** If your existing Worker shows `TRUSTDATA_API_KEY`
+> as type **Plaintext** under Settings → Variables and Secrets, edit it and switch the
+> type to **Secret** (then redeploy). The Worker reads `env.TRUSTDATA_API_KEY` either
+> way — the binding is identical at runtime.
 
-### Hardening: convert API key to a secret (post-deploy, optional)
+## No GitHub or GitLab account? Paste the Worker
 
-The Deploy button stores `TRUSTDATA_API_KEY` as a regular env variable so it can be filled in via the UI. For production, swap it to a secret so it's hidden from the dashboard:
+The Deploy button forks this repo into a Git account. If you don't have one, build the Worker by hand in the Cloudflare dashboard — copy-paste, no terminal, no Git:
 
-1. Cloudflare dashboard → Workers & Pages → `trustdata-ai-bot-collector` → **Settings** → **Variables and Secrets**
-2. Edit `TRUSTDATA_API_KEY` → change Type to **Secret** → Save
+1. **Workers & Pages → Create → Start with Hello World → Deploy**, then open the Worker and click **Edit code**.
+2. Open [`worker.bundle.js`](worker.bundle.js) — a pre-built single-file JS copy of the Worker — click **Copy raw file** on GitHub, and paste it over the default code (replace everything). Click **Deploy**.
+3. **Settings → Variables and Secrets** — add the variables from the [Configuration](#configuration) table. Set `TRUSTDATA_API_KEY` as a **Secret**; add the rest as plaintext.
+4. **Settings → Bindings → Add → KV namespace** — create one and bind it as `WEBMCP_CACHE` (optional; skip to disable manifest caching).
+5. **Settings → Domains & Routes** — add a route `*.yourdomain.com/*`.
 
-The Worker reads `env.TRUSTDATA_API_KEY` either way; the binding is identical at runtime.
+> `worker.bundle.js` is generated from `src/`. Maintainers: regenerate it with `npm run bundle` after any source change so the paste path stays in sync.
 
 ## Alternative — Logpush (if your Cloudflare plan includes it)
 
@@ -91,32 +112,18 @@ Setup (~5 min, all in the Cloudflare dashboard):
 
 Logpush hits the Go server's `/v1/logs/cloudflare_logpush` endpoint (NDJSON). Same classification logic as the Worker path — same ClickHouse output. No Worker, no KV namespace, no `wrangler` CLI.
 
-## Quick start — CLI (advanced)
-
-```bash
-cd cloud/cloudflare/ai-bot-collector
-npm install
-
-# 1. Edit wrangler.jsonc — set `route` to your zone, set TRUSTDATA_ATTRIBUTION_ID
-# 2. Deploy first (creates the Worker)
-npx wrangler deploy
-
-# 3. Add the API key as a secret (get it from /organizations/<org_id>/#integrations)
-npx wrangler secret put TRUSTDATA_API_KEY
-```
-
 ## Configuration
 
 | Variable | Type | Purpose |
 |----------|------|---------|
 | `TRUSTDATA_INGEST_URL` | var | HTTPS endpoint (pre-filled to `https://t.trustdata.tech/v1/logs/cloudflare_worker`) |
 | `TRUSTDATA_ATTRIBUTION_ID` | var | Your TrustData attribution ID — tags events + keys the WebMCP manifest |
-| `TRUSTDATA_API_KEY` | var (or secret post-deploy) | Auth key issued on `/organizations/<org_id>/#integrations` → Cloudflare. The Deploy button uses a var so it can prompt for it; convert to a secret after deploy for hardening (see above). |
+| `TRUSTDATA_API_KEY` | **secret** | Auth key issued on `/organizations/<org_id>/#integrations` → Cloudflare. Declared in `.dev.vars.example`, so the Deploy button stores it as an encrypted secret, not a plaintext var. |
 | `TRUSTDATA_MANIFEST_URL` | var *(optional)* | Base URL for the WebMCP manifest API. Pre-filled to `https://app.trustdata.tech/api/v1/webmcp` — leave blank to disable manifest hosting |
 | `TRUSTDATA_SAMPLE_RATE` | var *(optional)* | Fraction of non-AI traffic forwarded as anonymized samples. Pre-filled to `0.02`; `0` disables sampling |
 | `TRUSTDATA_BOTLIST_URL` | var *(optional)* | Canonical AI bot list endpoint for runtime sync. Pre-filled to `https://t.trustdata.tech/v1/config/ai-bots`; leave blank to pin the embedded list |
 | `TRUSTDATA_FORWARD_ALL` | var *(optional)* | `true` → forward all traffic unfiltered (legacy behavior, requires DPA). Unset by default |
-| `WEBMCP_CACHE` | KV binding *(optional)* | Edge cache for the signed manifest (1-hour TTL). Auto-provisioned by the Deploy button, or `wrangler kv namespace create webmcp_cache` for the CLI path |
+| `WEBMCP_CACHE` | KV binding *(optional)* | Edge cache for the signed manifest (1-hour TTL). Auto-provisioned by the Deploy button. |
 
 ## Testing
 

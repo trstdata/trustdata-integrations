@@ -43,8 +43,8 @@ export interface Env {
   // Fraction (0–1, as a string) of non-AI traffic forwarded as anonymized
   // samples. Unset → DEFAULT_SAMPLE_RATE. "0" disables sampling.
   TRUSTDATA_SAMPLE_RATE?: string;
-  // Endpoint serving the canonical AI bot list (see /v1/config/ai-bots on the
-  // TrustData collector). When set, the Worker syncs its edge lists from it
+  // Endpoint serving the canonical AI bot list (the TrustData API's
+  // /v1/config/ai-bots). When set, the Worker syncs its edge lists from it
   // (in-memory + KV cache) so new bots are matched in full fidelity without a
   // re-deploy. Unset or unreachable → the embedded lists below.
   TRUSTDATA_BOTLIST_URL?: string;
@@ -78,8 +78,7 @@ export interface LogEntry {
 }
 
 // ── Edge classification ─────────────────────────────────────────────────────
-// Mirrors the server's lists (trustdata-cloud: enrichment.AIBotUserAgents and
-// DomainSourceCategoryMapping[SOURCE_CATEGORY_AI]). The server re-classifies
+// Mirrors the canonical server-side AI-bot list. The server re-classifies
 // every forwarded event with its own copy, so a stale list here only affects
 // what gets sampled vs. fully forwarded — never what gets counted as a bot.
 
@@ -178,9 +177,9 @@ export const EMBEDDED_BOT_LISTS: BotLists = {
 
 // ── Bot list sync ────────────────────────────────────────────────────────────
 // The embedded lists above are a fallback snapshot. When TRUSTDATA_BOTLIST_URL
-// is configured, the Worker syncs the canonical lists from the TrustData
-// collector (single source of truth: enrichment.AIBotPatterns in Go), so
-// customer Workers pick up new bots without anyone re-deploying.
+// is configured, the Worker syncs the canonical lists from TrustData (the
+// single source of truth), so customer Workers pick up new bots without
+// anyone re-deploying.
 //
 // Three tiers: per-isolate memory (10 min) → KV (6 h, shared across isolates)
 // → upstream fetch. Any failure falls back to the embedded lists; a stale list
@@ -359,7 +358,7 @@ export function parseSampleRate(raw: string | undefined): number {
 // A user-agent is trivially spoofable. We verify a claimed AI bot's IP against
 // the union of vendors' published CIDR ranges AT THE EDGE, so the raw IP never
 // leaves the customer's zone — only a boolean reaches TrustData. Sources mirror
-// the Go collector's botverify.DefaultSources (OpenAI / Google / Perplexity),
+// the canonical server-side verification list (OpenAI / Google / Perplexity),
 // which all use Google's prefix-list JSON shape:
 //   {"prefixes":[{"ipv4Prefix":"1.2.3.0/24"},{"ipv6Prefix":"2a00::/32"}]}
 // Refs:
@@ -787,7 +786,7 @@ export async function verifySignature(request: Request, env: Env): Promise<Signa
   }
 }
 
-// Kept in sync with the Django endpoint's Cache-Control max-age; the Worker
+// Kept in sync with the upstream endpoint's Cache-Control max-age; the Worker
 // uses its own TTL so we can evict faster on manual rotation without
 // waiting for the upstream cache to expire.
 export const WEBMCP_CACHE_TTL_SECONDS = 3600;
@@ -908,7 +907,7 @@ export async function forwardLog(
 /**
  * Serve the signed WebMCP manifest at /.well-known/webmcp.json.
  *
- * Flow: KV cache → upstream Django → fallthrough. The manifest itself
+ * Flow: KV cache → upstream TrustData API → fallthrough. The manifest itself
  * carries an Ed25519 signature, so downstream caches (KV, CDN, browsers)
  * never need to be trusted — agents verify the signature independently.
  */

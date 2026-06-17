@@ -7,13 +7,14 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bundle": "wrangler deploy --dry-run --outdir dist && sed '/^\\/\\/# sourceMappingURL=/d' dist/index.js > worker.bundle.js"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.8.0",
+    "@cloudflare/vitest-pool-workers": "^0.16.16",
     "@cloudflare/workers-types": "^4.20250129.0",
     "typescript": "^5.4.0",
-    "vitest": "^3.0.0",
+    "vitest": "^4.1.9",
     "wrangler": "^4.0.0"
   }
 }
