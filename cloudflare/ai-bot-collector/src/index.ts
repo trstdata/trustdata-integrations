@@ -70,6 +70,11 @@ export interface LogEntry {
   // Present only on anonymized sample entries: the probability this request
   // was forwarded with. The server weights the event by 1/sample_rate.
   sample_rate?: number;
+  // Anti-spoof verdict for bot hits, decided at the edge against vendors'
+  // published IP ranges so the raw IP never leaves the zone. Undefined when no
+  // ranges were available to decide.
+  verified?: boolean;
+  verified_by?: string;
 }
 
 // ── Edge classification ─────────────────────────────────────────────────────
@@ -350,6 +355,438 @@ export function parseSampleRate(raw: string | undefined): number {
   return Math.min(rate, 1);
 }
 
+// ── Edge IP verification (anti-spoof) ───────────────────────────────────────
+// A user-agent is trivially spoofable. We verify a claimed AI bot's IP against
+// the union of vendors' published CIDR ranges AT THE EDGE, so the raw IP never
+// leaves the customer's zone — only a boolean reaches TrustData. Sources mirror
+// the Go collector's botverify.DefaultSources (OpenAI / Google / Perplexity),
+// which all use Google's prefix-list JSON shape:
+//   {"prefixes":[{"ipv4Prefix":"1.2.3.0/24"},{"ipv6Prefix":"2a00::/32"}]}
+// Refs:
+//   - https://developers.google.com/static/search/apis/ipranges/googlebot.json
+//   - https://platform.openai.com/docs/bots (OpenAI publishes gptbot/searchbot/chatgpt-user JSON)
+//   - https://developers.google.com/search/docs/crawling-indexing/verifying-googlebot
+// We match the union of all AI ranges (not per-engine): at this point the UA
+// already matched a known bot, so "is this one of the known AI crawler IPs?" is
+// the question. A spoofer would need to control a real vendor IP to pass.
+export const BOT_IP_RANGE_URLS = [
+  "https://openai.com/gptbot.json",
+  "https://openai.com/searchbot.json",
+  "https://openai.com/chatgpt-user.json",
+  "https://developers.google.com/static/search/apis/ipranges/googlebot.json",
+  "https://developers.google.com/static/search/apis/ipranges/special-crawlers.json",
+  "https://developers.google.com/static/search/apis/ipranges/user-triggered-fetchers-google.json",
+  "https://www.perplexity.com/perplexitybot.json",
+  "https://www.perplexity.com/perplexity-user.json",
+];
+
+export const BOTIP_CACHE_KEY = "aibotips:v1";
+export const BOTIP_KV_TTL_SECONDS = 21600; // 6 h
+export const BOTIP_MEMORY_TTL_MS = 10 * 60 * 1000;
+
+export interface CidrRange {
+  base: bigint;
+  mask: bigint;
+  v6: boolean;
+}
+
+let botIPCache: { ranges: CidrRange[]; fetchedAt: number } | null = null;
+
+// Test hook — isolates the module-level cache between test cases.
+export function _resetBotIPCache(): void {
+  botIPCache = null;
+}
+
+// ipToBigInt parses an IPv4 or IPv6 literal (expanding "::") to a single integer.
+export function ipToBigInt(ip: string): { value: bigint; v6: boolean } | null {
+  if (ip.includes(":")) {
+    const halves = ip.split("::");
+    if (halves.length > 2) {
+      return null;
+    }
+    const head = halves[0] ? halves[0].split(":") : [];
+    const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+    const missing = 8 - head.length - tail.length;
+    if (missing < 0 || (halves.length === 1 && head.length !== 8)) {
+      return null;
+    }
+    const groups =
+      halves.length === 2 ? [...head, ...Array(missing).fill("0"), ...tail] : head;
+    if (groups.length !== 8) {
+      return null;
+    }
+    let value = 0n;
+    for (const g of groups) {
+      const n = parseInt(g || "0", 16);
+      if (Number.isNaN(n) || n < 0 || n > 0xffff || !/^[0-9a-fA-F]{1,4}$/.test(g || "0")) {
+        return null;
+      }
+      value = (value << 16n) | BigInt(n);
+    }
+    return { value, v6: true };
+  }
+  const octets = ip.split(".");
+  if (octets.length !== 4) {
+    return null;
+  }
+  let value = 0n;
+  for (const o of octets) {
+    const n = Number(o);
+    if (!Number.isInteger(n) || n < 0 || n > 255 || !/^\d{1,3}$/.test(o)) {
+      return null;
+    }
+    value = (value << 8n) | BigInt(n);
+  }
+  return { value, v6: false };
+}
+
+export function parseCidr(cidr: string): CidrRange | null {
+  const slash = cidr.indexOf("/");
+  if (slash < 0) {
+    return null;
+  }
+  const parsed = ipToBigInt(cidr.slice(0, slash));
+  if (!parsed) {
+    return null;
+  }
+  const bits = Number(cidr.slice(slash + 1));
+  const width = parsed.v6 ? 128 : 32;
+  if (!Number.isInteger(bits) || bits < 0 || bits > width) {
+    return null;
+  }
+  const full = (1n << BigInt(width)) - 1n;
+  const mask = bits === 0 ? 0n : (full << BigInt(width - bits)) & full;
+  return { base: parsed.value & mask, mask, v6: parsed.v6 };
+}
+
+export function ipInRanges(ip: string | null, ranges: CidrRange[]): boolean {
+  if (!ip) {
+    return false;
+  }
+  const parsed = ipToBigInt(ip);
+  if (!parsed) {
+    return false;
+  }
+  for (const r of ranges) {
+    if (r.v6 === parsed.v6 && (parsed.value & r.mask) === r.base) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// getBotIPRanges fetches and caches the union of vendor CIDR ranges (3-tier:
+// memory 10 min → KV 6 h → upstream). Any failure yields an empty set, which
+// leaves bot hits unverified rather than falsely failing them.
+export async function getBotIPRanges(env: Env): Promise<CidrRange[]> {
+  if (botIPCache && Date.now() - botIPCache.fetchedAt < BOTIP_MEMORY_TTL_MS) {
+    return botIPCache.ranges;
+  }
+  try {
+    if (env.WEBMCP_CACHE) {
+      const cached = await env.WEBMCP_CACHE.get(BOTIP_CACHE_KEY);
+      if (cached) {
+        const ranges = (JSON.parse(cached) as string[])
+          .map(parseCidr)
+          .filter((r): r is CidrRange => r !== null);
+        if (ranges.length > 0) {
+          botIPCache = { ranges, fetchedAt: Date.now() };
+          return ranges;
+        }
+      }
+    }
+    const cidrs: string[] = [];
+    for (const url of BOT_IP_RANGE_URLS) {
+      try {
+        const resp = await fetch(url, { headers: { Accept: "application/json" } });
+        if (!resp.ok) {
+          continue;
+        }
+        const body = (await resp.json()) as {
+          prefixes?: Array<{ ipv4Prefix?: string; ipv6Prefix?: string }>;
+        };
+        for (const p of body.prefixes ?? []) {
+          const c = p.ipv4Prefix || p.ipv6Prefix;
+          if (c) {
+            cidrs.push(c);
+          }
+        }
+      } catch (err) {
+        console.error("trustdata bot IP range fetch failed:", url, err);
+      }
+    }
+    const ranges = cidrs.map(parseCidr).filter((r): r is CidrRange => r !== null);
+    if (env.WEBMCP_CACHE && cidrs.length > 0) {
+      await env.WEBMCP_CACHE.put(BOTIP_CACHE_KEY, JSON.stringify(cidrs), {
+        expirationTtl: BOTIP_KV_TTL_SECONDS,
+      });
+    }
+    botIPCache = { ranges, fetchedAt: Date.now() };
+    return ranges;
+  } catch (err) {
+    console.error("trustdata bot IP range sync failed:", err);
+    botIPCache = { ranges: [], fetchedAt: Date.now() };
+    return [];
+  }
+}
+
+// ── Web Bot Auth signature verification (RFC 9421) ──────────────────────────
+// The strongest, IP-free proof of identity: the bot signs its request with an
+// Ed25519 HTTP Message Signature (RFC 9421). OpenAI already signs Operator /
+// ChatGPT requests; Cloudflare and Vercel verify the same way. We verify at the
+// edge with WebCrypto: the signer advertises its key directory via the
+// Signature-Agent header; we fetch the directory (JWKS), pick the key whose
+// RFC 7638 thumbprint matches the signature keyid, rebuild the signature base,
+// and verify. No IP involved.
+// Refs:
+//   - https://www.rfc-editor.org/rfc/rfc9421 (HTTP Message Signatures)
+//   - https://www.rfc-editor.org/rfc/rfc7638 (JWK Thumbprint)
+//   - https://blog.cloudflare.com/web-bot-auth/
+//   - https://datatracker.ietf.org/doc/draft-meunier-web-bot-auth-architecture/
+export const BOTKEYS_CACHE_PREFIX = "aibotkeys:v1:";
+
+export type SignatureResult = "verified" | "unverified" | "unknown";
+
+export interface ParsedSigInput {
+  label: string;
+  covered: string[];
+  rawParams: string; // verbatim "(...);params" used as the @signature-params value
+  keyid: string;
+  alg: string;
+}
+
+export function parseSignatureInput(raw: string): ParsedSigInput | null {
+  const s = raw.trim();
+  const eq = s.indexOf("=");
+  if (eq <= 0) {
+    return null;
+  }
+  const label = s.slice(0, eq).trim();
+  const rawParams = s.slice(eq + 1).trim();
+  if (!rawParams.startsWith("(")) {
+    return null;
+  }
+  const close = rawParams.indexOf(")");
+  if (close < 0) {
+    return null;
+  }
+  const covered = rawParams
+    .slice(1, close)
+    .split(/\s+/)
+    .map((t) => t.replace(/^"|"$/g, ""))
+    .filter(Boolean);
+  if (covered.length === 0) {
+    return null;
+  }
+  return {
+    label,
+    covered,
+    rawParams,
+    keyid: sfQuotedParam(rawParams, "keyid"),
+    alg: sfQuotedParam(rawParams, "alg"),
+  };
+}
+
+function sfQuotedParam(raw: string, name: string): string {
+  const m = raw.match(new RegExp(`${name}="([^"]*)"`));
+  return m ? m[1] : "";
+}
+
+function sfIntParam(raw: string, name: string): number | null {
+  const m = raw.match(new RegExp(`${name}=(\\d+)`));
+  return m ? Number(m[1]) : null;
+}
+
+export function parseSignature(raw: string, label: string): Uint8Array | null {
+  for (const part of raw.split(",")) {
+    const p = part.trim();
+    const eq = p.indexOf("=");
+    if (eq <= 0 || p.slice(0, eq).trim() !== label) {
+      continue;
+    }
+    const val = p.slice(eq + 1).trim();
+    if (val.length < 2 || val[0] !== ":" || val[val.length - 1] !== ":") {
+      return null;
+    }
+    try {
+      return base64ToBytes(val.slice(1, -1));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    out[i] = bin.charCodeAt(i);
+  }
+  return out;
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let bin = "";
+  for (const b of bytes) {
+    bin += String.fromCharCode(b);
+  }
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// buildSignatureBase rebuilds the RFC 9421 base: one line per covered component,
+// then the @signature-params line carrying the raw params verbatim. Returns null
+// if any covered component can't be resolved (fail closed).
+export function buildSignatureBase(
+  req: { method: string; authority: string; path: string; headers: Headers },
+  covered: string[],
+  rawParams: string,
+): string | null {
+  const lines: string[] = [];
+  for (const c of covered) {
+    let value: string | null;
+    switch (c) {
+      case "@method":
+        value = req.method;
+        break;
+      case "@authority":
+        value = req.authority;
+        break;
+      case "@path":
+        value = req.path;
+        break;
+      default:
+        if (c.startsWith("@")) {
+          return null; // unsupported derived component
+        }
+        value = req.headers.get(c);
+        break;
+    }
+    if (value === null || value === undefined) {
+      return null;
+    }
+    lines.push(`"${c}": ${value}`);
+  }
+  lines.push(`"@signature-params": ${rawParams}`);
+  return lines.join("\n");
+}
+
+// RFC 7638 JWK thumbprint for an OKP (Ed25519) key — the Web Bot Auth keyid.
+export async function jwkThumbprint(jwk: {
+  kty: string;
+  crv: string;
+  x: string;
+}): Promise<string> {
+  const json = `{"crv":"${jwk.crv}","kty":"${jwk.kty}","x":"${jwk.x}"}`;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(json));
+  return bytesToBase64Url(new Uint8Array(digest));
+}
+
+async function fetchKeyDirectory(url: string, env: Env): Promise<JsonWebKey[]> {
+  const cacheKey = `${BOTKEYS_CACHE_PREFIX}${url}`;
+  try {
+    if (env.WEBMCP_CACHE) {
+      const cached = await env.WEBMCP_CACHE.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached) as JsonWebKey[];
+      }
+    }
+    const resp = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!resp.ok) {
+      return [];
+    }
+    const body = (await resp.json()) as { keys?: JsonWebKey[] };
+    const keys = Array.isArray(body.keys) ? body.keys : [];
+    if (env.WEBMCP_CACHE && keys.length > 0) {
+      await env.WEBMCP_CACHE.put(cacheKey, JSON.stringify(keys), {
+        expirationTtl: BOTIP_KV_TTL_SECONDS,
+      });
+    }
+    return keys;
+  } catch (err) {
+    console.error("trustdata key directory fetch failed:", url, err);
+    return [];
+  }
+}
+
+// verifySignature verifies a bot's Ed25519 HTTP Message Signature at the edge.
+// Returns "unknown" when there's nothing to verify or we can't fetch the key
+// (→ caller falls back to CIDR), "verified"/"unverified" when we reach a verdict.
+export async function verifySignature(request: Request, env: Env): Promise<SignatureResult> {
+  const sigHeader = request.headers.get("signature");
+  const sigInputHeader = request.headers.get("signature-input");
+  if (!sigHeader || !sigInputHeader) {
+    return "unknown";
+  }
+  const parsed = parseSignatureInput(sigInputHeader);
+  if (!parsed || !parsed.keyid || (parsed.alg && parsed.alg !== "ed25519")) {
+    return "unknown";
+  }
+  const expires = sfIntParam(parsed.rawParams, "expires");
+  if (expires !== null && expires * 1000 < Date.now()) {
+    return "unverified"; // expired signature
+  }
+  const sig = parseSignature(sigHeader, parsed.label);
+  if (!sig) {
+    return "unknown";
+  }
+  // The signer advertises its key directory via Signature-Agent.
+  const agent = request.headers.get("signature-agent");
+  if (!agent) {
+    return "unknown";
+  }
+  let directoryUrl: string;
+  try {
+    directoryUrl = new URL(agent.trim().replace(/^"|"$/g, "")).toString();
+  } catch {
+    return "unknown";
+  }
+  const keys = await fetchKeyDirectory(directoryUrl, env);
+  let jwk: JsonWebKey | undefined;
+  for (const k of keys) {
+    if (k.kty !== "OKP" || k.crv !== "Ed25519" || typeof k.x !== "string") {
+      continue;
+    }
+    const tp = await jwkThumbprint({ kty: k.kty, crv: k.crv, x: k.x });
+    if (tp === parsed.keyid || (k as { kid?: string }).kid === parsed.keyid) {
+      jwk = k;
+      break;
+    }
+  }
+  if (!jwk) {
+    return "unknown"; // can't resolve the key → defer to CIDR rather than fail
+  }
+  const url = new URL(request.url);
+  const base = buildSignatureBase(
+    {
+      method: request.method,
+      authority: url.host,
+      path: url.pathname,
+      headers: request.headers,
+    },
+    parsed.covered,
+    parsed.rawParams,
+  );
+  if (base === null) {
+    return "unknown"; // a covered component we don't support → defer to CIDR
+  }
+  try {
+    const key = await crypto.subtle.importKey("jwk", jwk, { name: "Ed25519" }, false, [
+      "verify",
+    ]);
+    const ok = await crypto.subtle.verify(
+      { name: "Ed25519" },
+      key,
+      sig,
+      new TextEncoder().encode(base),
+    );
+    return ok ? "verified" : "unverified";
+  } catch (err) {
+    console.error("trustdata signature verify failed:", err);
+    return "unknown";
+  }
+}
+
 // Kept in sync with the Django endpoint's Cache-Control max-age; the Worker
 // uses its own TTL so we can evict faster on manual rotation without
 // waiting for the upstream cache to expire.
@@ -430,6 +867,27 @@ export async function forwardLog(
     log.query_params = {};
     log.referer = refererHost(referer);
     log.sample_rate = sampleRate;
+  } else if (match === "bot") {
+    // Anti-spoof at the edge, strongest first: a valid HTTP Message Signature
+    // (RFC 9421) proves identity without any IP. If the bot didn't sign (or we
+    // can't resolve its key), fall back to matching the IP against published
+    // ranges. Either way the raw IP is dropped so it never leaves the zone.
+    const sigResult = await verifySignature(request, env);
+    if (sigResult !== "unknown") {
+      log.verified = sigResult === "verified";
+      log.verified_by = "signature";
+    } else {
+      const ranges = await getBotIPRanges(env);
+      if (ranges.length > 0) {
+        log.verified = ipInRanges(log.ip, ranges);
+        log.verified_by = "edge_cidr";
+      }
+    }
+    log.ip = null;
+  } else if (match === "referral") {
+    // Human referral from an AI engine — the IP is not used downstream, so we
+    // never forward it.
+    log.ip = null;
   }
 
   try {
