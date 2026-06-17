@@ -1,11 +1,8 @@
 // TrustData AI Bot Collector — customer-deployed Cloudflare Worker.
 //
-// Two install paths:
-//   1. Click the "Deploy to Cloudflare" button in the README — the form
-//      prompts for TRUSTDATA_API_KEY + TRUSTDATA_ATTRIBUTION_ID and
-//      auto-provisions the KV namespace.
-//   2. CLI: `npx wrangler deploy`, then `npx wrangler secret put
-//      TRUSTDATA_API_KEY` to swap the var to a hidden secret.
+// Deploy with the "Deploy to Cloudflare" button in the README — the guided
+// setup prompts for TRUSTDATA_API_KEY + TRUSTDATA_ATTRIBUTION_ID and
+// auto-provisions the KV namespace, all in the browser.
 //
 // The Worker classifies at the edge: AI-bot and AI-referral requests are
 // forwarded to TrustData's ingest endpoint in full; the rest of the traffic
@@ -16,7 +13,7 @@
 // (Workers & Pages → trustdata-ai-bot-collector → Settings → Triggers →
 // Add route — set it to e.g. "*.yourdomain.com/*"). We don't hardcode a
 // route here because each deployer's zone is different and a placeholder
-// route makes `wrangler deploy` fail on the customer's first run.
+// route makes the customer's first deploy fail.
 //
 // The KV binding is optional — remove the kv_namespaces block to disable
 // WebMCP manifest caching (the Worker will fetch upstream on every
@@ -31,7 +28,6 @@
     "TRUSTDATA_INGEST_URL": "https://t.trustdata.tech/v1/logs/cloudflare_worker",
     "TRUSTDATA_MANIFEST_URL": "https://app.trustdata.tech/api/v1/webmcp",
     "TRUSTDATA_ATTRIBUTION_ID": "",
-    "TRUSTDATA_API_KEY": "",
     "TRUSTDATA_SAMPLE_RATE": "0.02",
     "TRUSTDATA_BOTLIST_URL": "https://t.trustdata.tech/v1/config/ai-bots"
   },

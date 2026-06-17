@@ -1,0 +1,11 @@
+# TrustData ingest key — stored as an encrypted Worker SECRET, never plaintext.
+#
+# This file (dotenv format) tells the "Deploy to Cloudflare" button to prompt
+# for TRUSTDATA_API_KEY and store it as a secret rather than a plaintext var.
+# For local `wrangler dev`, copy this file to `.dev.vars` and fill in the value.
+# CLI deploy: `wrangler secret put TRUSTDATA_API_KEY`. Dashboard: add it under
+# Settings → Variables and Secrets with Type = Secret.
+#
+# Issue the key in TrustData: /organizations/<org_id>/#integrations (provider:
+# Cloudflare). It looks like `td_cf_...`.
+TRUSTDATA_API_KEY=
