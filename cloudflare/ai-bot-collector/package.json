@@ -1,6 +1,6 @@
 {
   "name": "trustdata-ai-bot-collector",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Cloudflare Worker that classifies AI traffic at the edge and forwards it to TrustData, plus an anonymized baseline sample.",
   "private": true,
   "main": "src/index.ts",
