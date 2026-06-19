@@ -86,50 +86,67 @@ export interface LogEntry {
 // inconsistent about casing (Meta ships "meta-externalagent/1.1"). The edge
 // only decides "AI or not"; the server assigns the canonical bot name and
 // intent (training / search / on_demand).
-export const AI_BOT_USER_AGENTS = [
+//
+// Each entry carries its vendor `engine` slug (matching the server's enrichment
+// engine + botverify.DefaultSources keys) so the edge knows whether the vendor
+// publishes an IP-range list and can therefore be IP-verified. This is the
+// offline fallback snapshot; the live list arrives via /v1/config/ai-bots.
+export interface BotPattern {
+  pattern: string; // lowercased UA substring
+  engine: string; // vendor slug
+}
+
+// Vendors that publish an IP-range list (see BOT_IP_RANGE_URLS) — only their
+// bots can be IP-verified at the edge. Mirrors botverify.DefaultSources keys on
+// the server. Offline fallback; the live set arrives as `verifiable_engines` in
+// /v1/config/ai-bots, so adding/removing a verifiable vendor hot-propagates to
+// deployed workers without a redeploy.
+export const EMBEDDED_VERIFIABLE_ENGINES = new Set(["openai", "google", "perplexity"]);
+
+export const EMBEDDED_BOT_PATTERNS: BotPattern[] = [
   // OpenAI
-  "gptbot",
-  "oai-searchbot",
-  "chatgpt-user",
+  { pattern: "gptbot", engine: "openai" },
+  { pattern: "oai-searchbot", engine: "openai" },
+  { pattern: "chatgpt-user", engine: "openai" },
   // Anthropic
-  "claudebot",
-  "claude-searchbot",
-  "claude-user",
-  "claude-web",    // deprecated, residual traffic
-  "anthropic-ai",  // deprecated, residual traffic
+  { pattern: "claudebot", engine: "anthropic" },
+  { pattern: "claude-searchbot", engine: "anthropic" },
+  { pattern: "claude-user", engine: "anthropic" },
+  { pattern: "claude-web", engine: "anthropic" }, // deprecated, residual traffic
+  { pattern: "anthropic-ai", engine: "anthropic" }, // deprecated, residual traffic
   // Perplexity
-  "perplexitybot",
-  "perplexity-user",
+  { pattern: "perplexitybot", engine: "perplexity" },
+  { pattern: "perplexity-user", engine: "perplexity" },
   // Google ("Google-Extended" is a robots.txt token, never a UA)
-  "googleother",
-  "google-cloudvertexbot",
-  "google-notebooklm",
-  "gemini-deep-research",
+  { pattern: "googleother", engine: "google" },
+  { pattern: "google-cloudvertexbot", engine: "google" },
+  { pattern: "google-notebooklm", engine: "google" },
+  { pattern: "gemini-deep-research", engine: "google" },
   // Meta
-  "meta-externalagent",
-  "meta-externalfetcher",
-  "meta-webindexer",
+  { pattern: "meta-externalagent", engine: "meta" },
+  { pattern: "meta-externalfetcher", engine: "meta" },
+  { pattern: "meta-webindexer", engine: "meta" },
   // Mistral
-  "mistralai-user",
-  "mistralai-index",
+  { pattern: "mistralai-user", engine: "mistral" },
+  { pattern: "mistralai-index", engine: "mistral" },
   // Amazon
-  "amazonbot",
-  "amzn-searchbot",
-  "amzn-user",
-  "agent-novaact",
+  { pattern: "amazonbot", engine: "amazon" },
+  { pattern: "amzn-searchbot", engine: "amazon" },
+  { pattern: "amzn-user", engine: "amazon" },
+  { pattern: "agent-novaact", engine: "amazon" },
   // ByteDance
-  "bytespider",
-  "tiktokspider",
+  { pattern: "bytespider", engine: "bytedance" },
+  { pattern: "tiktokspider", engine: "bytedance" },
   // Cohere
-  "cohere-training-data-crawler",
-  "cohere-ai",
+  { pattern: "cohere-training-data-crawler", engine: "cohere" },
+  { pattern: "cohere-ai", engine: "cohere" },
   // Others
-  "youbot",
-  "duckassistbot",
-  "petalbot",
-  "pangubot",
-  "deepseekbot",
-  "ccbot",
+  { pattern: "youbot", engine: "you" },
+  { pattern: "duckassistbot", engine: "duckduckgo" },
+  { pattern: "petalbot", engine: "huawei" },
+  { pattern: "pangubot", engine: "huawei" },
+  { pattern: "deepseekbot", engine: "deepseek" },
+  { pattern: "ccbot", engine: "commoncrawl" },
 ];
 
 export const AI_REFERRER_DOMAINS = new Set([
@@ -166,13 +183,15 @@ export const DEFAULT_SAMPLE_RATE = 0.02;
 export type EdgeMatch = "bot" | "referral" | null;
 
 export interface BotLists {
-  patterns: string[];
+  patterns: BotPattern[];
   referrerDomains: Set<string>;
+  verifiableEngines: Set<string>;
 }
 
 export const EMBEDDED_BOT_LISTS: BotLists = {
-  patterns: AI_BOT_USER_AGENTS,
+  patterns: EMBEDDED_BOT_PATTERNS,
   referrerDomains: AI_REFERRER_DOMAINS,
+  verifiableEngines: EMBEDDED_VERIFIABLE_ENGINES,
 };
 
 // ── Bot list sync ────────────────────────────────────────────────────────────
@@ -248,15 +267,19 @@ export async function getBotLists(env: Env): Promise<BotLists> {
 function parseBotLists(raw: string): BotLists | null {
   try {
     const body = JSON.parse(raw) as {
-      bot_patterns?: Array<{ pattern?: unknown }>;
+      bot_patterns?: Array<{ pattern?: unknown; engine?: unknown }>;
       ai_referrer_domains?: unknown[];
+      verifiable_engines?: unknown[];
     };
     if (!Array.isArray(body.bot_patterns)) {
       return null;
     }
     const patterns = body.bot_patterns
-      .map((e) => (typeof e.pattern === "string" ? e.pattern.toLowerCase() : ""))
-      .filter(Boolean);
+      .map((e) => ({
+        pattern: typeof e.pattern === "string" ? e.pattern.toLowerCase() : "",
+        engine: typeof e.engine === "string" ? e.engine.toLowerCase() : "",
+      }))
+      .filter((p) => p.pattern);
     if (patterns.length === 0) {
       return null;
     }
@@ -265,10 +288,19 @@ function parseBotLists(raw: string): BotLists | null {
         .filter((d): d is string => typeof d === "string")
         .map((d) => d.toLowerCase()),
     );
+    const verifiableEngines = new Set(
+      (Array.isArray(body.verifiable_engines) ? body.verifiable_engines : [])
+        .filter((e): e is string => typeof e === "string")
+        .map((e) => e.toLowerCase()),
+    );
     // A response without referrer domains is suspicious — keep the embedded set.
     return {
       patterns,
       referrerDomains: referrerDomains.size > 0 ? referrerDomains : AI_REFERRER_DOMAINS,
+      // Older servers don't send verifiable_engines yet — fall back to the
+      // embedded set rather than silently disabling verification mid-sync.
+      verifiableEngines:
+        verifiableEngines.size > 0 ? verifiableEngines : EMBEDDED_VERIFIABLE_ENGINES,
     };
   } catch {
     return null;
@@ -282,7 +314,7 @@ export function classifyRequest(
 ): EdgeMatch {
   if (userAgent) {
     const lower = userAgent.toLowerCase();
-    for (const pattern of lists.patterns) {
+    for (const { pattern } of lists.patterns) {
       if (lower.includes(pattern)) {
         return "bot";
       }
@@ -378,6 +410,28 @@ export const BOT_IP_RANGE_URLS = [
   "https://www.perplexity.com/perplexitybot.json",
   "https://www.perplexity.com/perplexity-user.json",
 ];
+
+// isVerifiableBotUA reports whether the matched bot's vendor publishes an IP
+// range list — i.e. whether its engine is in the (synced) verifiable_engines
+// set. Only then is a CIDR miss a real spoof; for every other AI bot we hold no
+// list, so the honest verdict is "unknown" and the caller leaves `verified`
+// unset rather than stamping a false negative. Mirrors the server botverify
+// StatusUnknown fail-open. First UA match wins, same as classifyRequest.
+export function isVerifiableBotUA(
+  userAgent: string | null,
+  lists: BotLists = EMBEDDED_BOT_LISTS,
+): boolean {
+  if (!userAgent) {
+    return false;
+  }
+  const lower = userAgent.toLowerCase();
+  for (const { pattern, engine } of lists.patterns) {
+    if (lower.includes(pattern)) {
+      return lists.verifiableEngines.has(engine);
+    }
+  }
+  return false;
+}
 
 export const BOTIP_CACHE_KEY = "aibotips:v1";
 export const BOTIP_KV_TTL_SECONDS = 21600; // 6 h
@@ -875,7 +929,11 @@ export async function forwardLog(
     if (sigResult !== "unknown") {
       log.verified = sigResult === "verified";
       log.verified_by = "signature";
-    } else {
+    } else if (isVerifiableBotUA(userAgent, lists)) {
+      // CIDR fallback only for vendors that publish an IP-range list (per the
+      // synced verifiable_engines set). Bots from vendors with no published
+      // ranges stay verified=unknown (unset) — see isVerifiableBotUA — so we
+      // never stamp a false negative that reads as a spoof downstream.
       const ranges = await getBotIPRanges(env);
       if (ranges.length > 0) {
         log.verified = ipInRanges(log.ip, ranges);

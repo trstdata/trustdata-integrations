@@ -27,6 +27,7 @@ import {
   parseCidr,
   ipInRanges,
   getBotIPRanges,
+  isVerifiableBotUA,
   _resetBotIPCache,
   verifySignature,
   buildSignatureBase,
@@ -139,9 +140,80 @@ describe("forwardLog", () => {
       );
       expect(ingest).toBeDefined();
       const log = JSON.parse((ingest![1] as RequestInit).body as string)[0];
-      expect(log.ip).toBeNull(); // verified at the edge — raw IP never leaves the zone
+      expect(log.ip).toBeNull(); // raw IP dropped at the edge regardless of verdict
       expect(log.query_params).toEqual({ ref: "abc" });
       expect(log.sample_rate).toBeUndefined();
+      // ClaudeBot's vendor (Anthropic) publishes no IP list, so the verdict is
+      // unknown — NOT a false "spoof".
+      expect(log.verified).toBeUndefined();
+      expect(log.verified_by).toBeUndefined();
+    });
+
+    // vendor range URLs end in .json; everything else (the ingest POST) is 204.
+    const mockVendorRanges = () =>
+      fetchSpy.mockImplementation((url: unknown) =>
+        Promise.resolve(
+          typeof url === "string" && url.endsWith(".json")
+            ? new Response(
+                JSON.stringify({ prefixes: [{ ipv4Prefix: "1.2.3.0/24" }] }),
+                { status: 200 },
+              )
+            : new Response(null, { status: 204 }),
+        ),
+      );
+
+    const ingestLog = () => {
+      const ingest = fetchSpy.mock.calls.find(
+        (c) => (c[1] as RequestInit)?.body !== undefined,
+      );
+      expect(ingest).toBeDefined();
+      return JSON.parse((ingest![1] as RequestInit).body as string)[0];
+    };
+
+    it("stamps verified=true for a publishing vendor whose IP is in range", async () => {
+      mockVendorRanges();
+      const req = buildRequest("https://example.com/", {
+        "user-agent": "Mozilla/5.0 (compatible; GPTBot/1.1)",
+        "cf-connecting-ip": "1.2.3.4",
+      });
+
+      await forwardLog(req, buildResponse(), baseEnv);
+
+      const log = ingestLog();
+      expect(log.verified).toBe(true);
+      expect(log.verified_by).toBe("edge_cidr");
+      expect(log.ip).toBeNull();
+    });
+
+    it("stamps verified=false for a publishing vendor whose IP is out of range (real spoof)", async () => {
+      mockVendorRanges();
+      const req = buildRequest("https://example.com/", {
+        "user-agent": "Mozilla/5.0 (compatible; GPTBot/1.1)",
+        "cf-connecting-ip": "9.9.9.9",
+      });
+
+      await forwardLog(req, buildResponse(), baseEnv);
+
+      const log = ingestLog();
+      expect(log.verified).toBe(false);
+      expect(log.verified_by).toBe("edge_cidr");
+    });
+
+    it("leaves the verdict unknown for a vendor with no published list, even when ranges load", async () => {
+      mockVendorRanges();
+      // Bytespider (ByteDance) publishes no list — a CIDR miss must not become
+      // a false "spoof".
+      const req = buildRequest("https://example.com/", {
+        "user-agent": "Bytespider; spider-feedback@bytedance.com",
+        "cf-connecting-ip": "9.9.9.9",
+      });
+
+      await forwardLog(req, buildResponse(), baseEnv);
+
+      const log = ingestLog();
+      expect(log.verified).toBeUndefined();
+      expect(log.verified_by).toBeUndefined();
+      expect(log.ip).toBeNull(); // still dropped — privacy unaffected by verdict
     });
 
     it("drops non-AI traffic when the sample roll misses", async () => {
@@ -258,6 +330,28 @@ describe("classifyRequest", () => {
   });
 });
 
+describe("isVerifiableBotUA", () => {
+  it("is true for vendors that publish IP ranges (OpenAI / Google / Perplexity)", () => {
+    expect(isVerifiableBotUA("Mozilla/5.0 (compatible; GPTBot/1.1)")).toBe(true);
+    expect(isVerifiableBotUA("ChatGPT-User/1.0")).toBe(true);
+    expect(isVerifiableBotUA("PerplexityBot/1.0")).toBe(true);
+    expect(isVerifiableBotUA("Mozilla/5.0 (compatible; GoogleOther)")).toBe(true);
+  });
+
+  it("is false for vendors with no published list (would otherwise read as spoof)", () => {
+    expect(isVerifiableBotUA("Mozilla/5.0 (compatible; ClaudeBot/1.0)")).toBe(false);
+    expect(isVerifiableBotUA("meta-externalagent/1.1")).toBe(false);
+    expect(isVerifiableBotUA("Bytespider; spider-feedback@bytedance.com")).toBe(false);
+    expect(isVerifiableBotUA("MistralAI-User/1.0")).toBe(false);
+  });
+
+  it("is false for null/empty and matches case-insensitively", () => {
+    expect(isVerifiableBotUA(null)).toBe(false);
+    expect(isVerifiableBotUA("")).toBe(false);
+    expect(isVerifiableBotUA("MOZILLA/5.0 (COMPATIBLE; GPTBOT/1.0)")).toBe(true);
+  });
+});
+
 describe("anonymizeIp", () => {
   it("zeroes the last IPv4 octet (/24)", () => {
     expect(anonymizeIp("203.0.113.77")).toBe("203.0.113.0");
@@ -349,7 +443,7 @@ describe("getBotLists (runtime sync)", () => {
     const { kv, spies } = buildKV();
     const lists = await getBotLists({ ...syncEnv, WEBMCP_CACHE: kv });
 
-    expect(lists.patterns).toContain("newbot9000");
+    expect(lists.patterns.some((p) => p.pattern === "newbot9000")).toBe(true);
     expect(classifyRequest("NewBot9000/1.0", null, lists)).toBe("bot");
     expect(classifyRequest("Mozilla/5.0", "https://newengine.ai/x", lists)).toBe("referral");
     expect(spies.put).toHaveBeenCalledWith(BOTLIST_CACHE_KEY, configBody, {
@@ -357,11 +451,37 @@ describe("getBotLists (runtime sync)", () => {
     });
   });
 
+  it("falls back to the embedded verifiable engines when the config omits them", async () => {
+    // configBody has no verifiable_engines → verification must not silently
+    // switch off; the embedded set (openai/google/perplexity) stands in.
+    const { kv } = buildKV();
+    const lists = await getBotLists({ ...syncEnv, WEBMCP_CACHE: kv });
+
+    expect(lists.verifiableEngines.has("openai")).toBe(true);
+    expect(isVerifiableBotUA("GPTBot/1.0", lists)).toBe(true);
+  });
+
+  it("lets the synced verifiable_engines set drive verifiability (no redeploy)", async () => {
+    // Server starts publishing Anthropic ranges: a deployed worker picks it up
+    // via sync and verifies ClaudeBot — without any code change.
+    const body = JSON.stringify({
+      version: 1,
+      bot_patterns: [{ pattern: "claudebot", engine: "anthropic" }],
+      ai_referrer_domains: ["claude.ai"],
+      verifiable_engines: ["anthropic"],
+    });
+    fetchSpy.mockResolvedValueOnce(new Response(body, { status: 200 }));
+    const lists = await getBotLists(syncEnv);
+
+    expect(lists.verifiableEngines.has("anthropic")).toBe(true);
+    expect(isVerifiableBotUA("ClaudeBot/1.0", lists)).toBe(true);
+  });
+
   it("serves from KV without hitting the upstream", async () => {
     const { kv } = buildKV(new Map([[BOTLIST_CACHE_KEY, configBody]]));
     const lists = await getBotLists({ ...syncEnv, WEBMCP_CACHE: kv });
 
-    expect(lists.patterns).toContain("newbot9000");
+    expect(lists.patterns.some((p) => p.pattern === "newbot9000")).toBe(true);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
