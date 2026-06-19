@@ -443,7 +443,7 @@ describe("getBotLists (runtime sync)", () => {
     const { kv, spies } = buildKV();
     const lists = await getBotLists({ ...syncEnv, WEBMCP_CACHE: kv });
 
-    expect(lists.patterns).toContain("newbot9000");
+    expect(lists.patterns.some((p) => p.pattern === "newbot9000")).toBe(true);
     expect(classifyRequest("NewBot9000/1.0", null, lists)).toBe("bot");
     expect(classifyRequest("Mozilla/5.0", "https://newengine.ai/x", lists)).toBe("referral");
     expect(spies.put).toHaveBeenCalledWith(BOTLIST_CACHE_KEY, configBody, {
@@ -451,11 +451,37 @@ describe("getBotLists (runtime sync)", () => {
     });
   });
 
+  it("falls back to the embedded verifiable engines when the config omits them", async () => {
+    // configBody has no verifiable_engines → verification must not silently
+    // switch off; the embedded set (openai/google/perplexity) stands in.
+    const { kv } = buildKV();
+    const lists = await getBotLists({ ...syncEnv, WEBMCP_CACHE: kv });
+
+    expect(lists.verifiableEngines.has("openai")).toBe(true);
+    expect(isVerifiableBotUA("GPTBot/1.0", lists)).toBe(true);
+  });
+
+  it("lets the synced verifiable_engines set drive verifiability (no redeploy)", async () => {
+    // Server starts publishing Anthropic ranges: a deployed worker picks it up
+    // via sync and verifies ClaudeBot — without any code change.
+    const body = JSON.stringify({
+      version: 1,
+      bot_patterns: [{ pattern: "claudebot", engine: "anthropic" }],
+      ai_referrer_domains: ["claude.ai"],
+      verifiable_engines: ["anthropic"],
+    });
+    fetchSpy.mockResolvedValueOnce(new Response(body, { status: 200 }));
+    const lists = await getBotLists(syncEnv);
+
+    expect(lists.verifiableEngines.has("anthropic")).toBe(true);
+    expect(isVerifiableBotUA("ClaudeBot/1.0", lists)).toBe(true);
+  });
+
   it("serves from KV without hitting the upstream", async () => {
     const { kv } = buildKV(new Map([[BOTLIST_CACHE_KEY, configBody]]));
     const lists = await getBotLists({ ...syncEnv, WEBMCP_CACHE: kv });
 
-    expect(lists.patterns).toContain("newbot9000");
+    expect(lists.patterns.some((p) => p.pattern === "newbot9000")).toBe(true);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

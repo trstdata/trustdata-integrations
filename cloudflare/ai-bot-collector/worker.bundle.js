@@ -2,52 +2,53 @@ var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
 // src/index.ts
-var AI_BOT_USER_AGENTS = [
+var EMBEDDED_VERIFIABLE_ENGINES = /* @__PURE__ */ new Set(["openai", "google", "perplexity"]);
+var EMBEDDED_BOT_PATTERNS = [
   // OpenAI
-  "gptbot",
-  "oai-searchbot",
-  "chatgpt-user",
+  { pattern: "gptbot", engine: "openai" },
+  { pattern: "oai-searchbot", engine: "openai" },
+  { pattern: "chatgpt-user", engine: "openai" },
   // Anthropic
-  "claudebot",
-  "claude-searchbot",
-  "claude-user",
-  "claude-web",
+  { pattern: "claudebot", engine: "anthropic" },
+  { pattern: "claude-searchbot", engine: "anthropic" },
+  { pattern: "claude-user", engine: "anthropic" },
+  { pattern: "claude-web", engine: "anthropic" },
   // deprecated, residual traffic
-  "anthropic-ai",
+  { pattern: "anthropic-ai", engine: "anthropic" },
   // deprecated, residual traffic
   // Perplexity
-  "perplexitybot",
-  "perplexity-user",
+  { pattern: "perplexitybot", engine: "perplexity" },
+  { pattern: "perplexity-user", engine: "perplexity" },
   // Google ("Google-Extended" is a robots.txt token, never a UA)
-  "googleother",
-  "google-cloudvertexbot",
-  "google-notebooklm",
-  "gemini-deep-research",
+  { pattern: "googleother", engine: "google" },
+  { pattern: "google-cloudvertexbot", engine: "google" },
+  { pattern: "google-notebooklm", engine: "google" },
+  { pattern: "gemini-deep-research", engine: "google" },
   // Meta
-  "meta-externalagent",
-  "meta-externalfetcher",
-  "meta-webindexer",
+  { pattern: "meta-externalagent", engine: "meta" },
+  { pattern: "meta-externalfetcher", engine: "meta" },
+  { pattern: "meta-webindexer", engine: "meta" },
   // Mistral
-  "mistralai-user",
-  "mistralai-index",
+  { pattern: "mistralai-user", engine: "mistral" },
+  { pattern: "mistralai-index", engine: "mistral" },
   // Amazon
-  "amazonbot",
-  "amzn-searchbot",
-  "amzn-user",
-  "agent-novaact",
+  { pattern: "amazonbot", engine: "amazon" },
+  { pattern: "amzn-searchbot", engine: "amazon" },
+  { pattern: "amzn-user", engine: "amazon" },
+  { pattern: "agent-novaact", engine: "amazon" },
   // ByteDance
-  "bytespider",
-  "tiktokspider",
+  { pattern: "bytespider", engine: "bytedance" },
+  { pattern: "tiktokspider", engine: "bytedance" },
   // Cohere
-  "cohere-training-data-crawler",
-  "cohere-ai",
+  { pattern: "cohere-training-data-crawler", engine: "cohere" },
+  { pattern: "cohere-ai", engine: "cohere" },
   // Others
-  "youbot",
-  "duckassistbot",
-  "petalbot",
-  "pangubot",
-  "deepseekbot",
-  "ccbot"
+  { pattern: "youbot", engine: "you" },
+  { pattern: "duckassistbot", engine: "duckduckgo" },
+  { pattern: "petalbot", engine: "huawei" },
+  { pattern: "pangubot", engine: "huawei" },
+  { pattern: "deepseekbot", engine: "deepseek" },
+  { pattern: "ccbot", engine: "commoncrawl" }
 ];
 var AI_REFERRER_DOMAINS = /* @__PURE__ */ new Set([
   "chatgpt.com",
@@ -79,8 +80,9 @@ var AI_REFERRER_DOMAINS = /* @__PURE__ */ new Set([
 ]);
 var DEFAULT_SAMPLE_RATE = 0.02;
 var EMBEDDED_BOT_LISTS = {
-  patterns: AI_BOT_USER_AGENTS,
-  referrerDomains: AI_REFERRER_DOMAINS
+  patterns: EMBEDDED_BOT_PATTERNS,
+  referrerDomains: AI_REFERRER_DOMAINS,
+  verifiableEngines: EMBEDDED_VERIFIABLE_ENGINES
 };
 var BOTLIST_CACHE_KEY = "aibots:v1";
 var BOTLIST_KV_TTL_SECONDS = 21600;
@@ -137,16 +139,25 @@ function parseBotLists(raw) {
     if (!Array.isArray(body.bot_patterns)) {
       return null;
     }
-    const patterns = body.bot_patterns.map((e) => typeof e.pattern === "string" ? e.pattern.toLowerCase() : "").filter(Boolean);
+    const patterns = body.bot_patterns.map((e) => ({
+      pattern: typeof e.pattern === "string" ? e.pattern.toLowerCase() : "",
+      engine: typeof e.engine === "string" ? e.engine.toLowerCase() : ""
+    })).filter((p) => p.pattern);
     if (patterns.length === 0) {
       return null;
     }
     const referrerDomains = new Set(
       (Array.isArray(body.ai_referrer_domains) ? body.ai_referrer_domains : []).filter((d) => typeof d === "string").map((d) => d.toLowerCase())
     );
+    const verifiableEngines = new Set(
+      (Array.isArray(body.verifiable_engines) ? body.verifiable_engines : []).filter((e) => typeof e === "string").map((e) => e.toLowerCase())
+    );
     return {
       patterns,
-      referrerDomains: referrerDomains.size > 0 ? referrerDomains : AI_REFERRER_DOMAINS
+      referrerDomains: referrerDomains.size > 0 ? referrerDomains : AI_REFERRER_DOMAINS,
+      // Older servers don't send verifiable_engines yet — fall back to the
+      // embedded set rather than silently disabling verification mid-sync.
+      verifiableEngines: verifiableEngines.size > 0 ? verifiableEngines : EMBEDDED_VERIFIABLE_ENGINES
     };
   } catch {
     return null;
@@ -156,7 +167,7 @@ __name(parseBotLists, "parseBotLists");
 function classifyRequest(userAgent, referer, lists = EMBEDDED_BOT_LISTS) {
   if (userAgent) {
     const lower = userAgent.toLowerCase();
-    for (const pattern of lists.patterns) {
+    for (const { pattern } of lists.patterns) {
       if (lower.includes(pattern)) {
         return "bot";
       }
@@ -233,26 +244,17 @@ var BOT_IP_RANGE_URLS = [
   "https://www.perplexity.com/perplexitybot.json",
   "https://www.perplexity.com/perplexity-user.json"
 ];
-var VERIFIABLE_BOT_UAS = [
-  // OpenAI
-  "gptbot",
-  "oai-searchbot",
-  "chatgpt-user",
-  // Google
-  "googleother",
-  "google-cloudvertexbot",
-  "google-notebooklm",
-  "gemini-deep-research",
-  // Perplexity
-  "perplexitybot",
-  "perplexity-user"
-];
-function isVerifiableBotUA(userAgent) {
+function isVerifiableBotUA(userAgent, lists = EMBEDDED_BOT_LISTS) {
   if (!userAgent) {
     return false;
   }
   const lower = userAgent.toLowerCase();
-  return VERIFIABLE_BOT_UAS.some((ua) => lower.includes(ua));
+  for (const { pattern, engine } of lists.patterns) {
+    if (lower.includes(pattern)) {
+      return lists.verifiableEngines.has(engine);
+    }
+  }
+  return false;
 }
 __name(isVerifiableBotUA, "isVerifiableBotUA");
 var BOTIP_CACHE_KEY = "aibotips:v1";
@@ -663,7 +665,7 @@ async function forwardLog(request, response, env) {
     if (sigResult !== "unknown") {
       log.verified = sigResult === "verified";
       log.verified_by = "signature";
-    } else if (isVerifiableBotUA(userAgent)) {
+    } else if (isVerifiableBotUA(userAgent, lists)) {
       const ranges = await getBotIPRanges(env);
       if (ranges.length > 0) {
         log.verified = ipInRanges(log.ip, ranges);
@@ -765,7 +767,6 @@ function buildManifestUrl(template, attributionId) {
 }
 __name(buildManifestUrl, "buildManifestUrl");
 export {
-  AI_BOT_USER_AGENTS,
   AI_REFERRER_DOMAINS,
   BOTIP_CACHE_KEY,
   BOTIP_KV_TTL_SECONDS,
@@ -777,7 +778,8 @@ export {
   BOT_IP_RANGE_URLS,
   DEFAULT_SAMPLE_RATE,
   EMBEDDED_BOT_LISTS,
-  VERIFIABLE_BOT_UAS,
+  EMBEDDED_BOT_PATTERNS,
+  EMBEDDED_VERIFIABLE_ENGINES,
   WEBMCP_CACHE_KEY_PREFIX,
   WEBMCP_CACHE_TTL_SECONDS,
   WEBMCP_PATH,
