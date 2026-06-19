@@ -233,6 +233,28 @@ var BOT_IP_RANGE_URLS = [
   "https://www.perplexity.com/perplexitybot.json",
   "https://www.perplexity.com/perplexity-user.json"
 ];
+var VERIFIABLE_BOT_UAS = [
+  // OpenAI
+  "gptbot",
+  "oai-searchbot",
+  "chatgpt-user",
+  // Google
+  "googleother",
+  "google-cloudvertexbot",
+  "google-notebooklm",
+  "gemini-deep-research",
+  // Perplexity
+  "perplexitybot",
+  "perplexity-user"
+];
+function isVerifiableBotUA(userAgent) {
+  if (!userAgent) {
+    return false;
+  }
+  const lower = userAgent.toLowerCase();
+  return VERIFIABLE_BOT_UAS.some((ua) => lower.includes(ua));
+}
+__name(isVerifiableBotUA, "isVerifiableBotUA");
 var BOTIP_CACHE_KEY = "aibotips:v1";
 var BOTIP_KV_TTL_SECONDS = 21600;
 var BOTIP_MEMORY_TTL_MS = 10 * 60 * 1e3;
@@ -641,7 +663,7 @@ async function forwardLog(request, response, env) {
     if (sigResult !== "unknown") {
       log.verified = sigResult === "verified";
       log.verified_by = "signature";
-    } else {
+    } else if (isVerifiableBotUA(userAgent)) {
       const ranges = await getBotIPRanges(env);
       if (ranges.length > 0) {
         log.verified = ipInRanges(log.ip, ranges);
@@ -755,6 +777,7 @@ export {
   BOT_IP_RANGE_URLS,
   DEFAULT_SAMPLE_RATE,
   EMBEDDED_BOT_LISTS,
+  VERIFIABLE_BOT_UAS,
   WEBMCP_CACHE_KEY_PREFIX,
   WEBMCP_CACHE_TTL_SECONDS,
   WEBMCP_PATH,
@@ -770,6 +793,7 @@ export {
   getBotLists,
   ipInRanges,
   ipToBigInt,
+  isVerifiableBotUA,
   jwkThumbprint,
   parseCidr,
   parseSampleRate,

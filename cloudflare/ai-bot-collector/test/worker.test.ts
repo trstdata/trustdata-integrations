@@ -27,6 +27,7 @@ import {
   parseCidr,
   ipInRanges,
   getBotIPRanges,
+  isVerifiableBotUA,
   _resetBotIPCache,
   verifySignature,
   buildSignatureBase,
@@ -139,9 +140,80 @@ describe("forwardLog", () => {
       );
       expect(ingest).toBeDefined();
       const log = JSON.parse((ingest![1] as RequestInit).body as string)[0];
-      expect(log.ip).toBeNull(); // verified at the edge — raw IP never leaves the zone
+      expect(log.ip).toBeNull(); // raw IP dropped at the edge regardless of verdict
       expect(log.query_params).toEqual({ ref: "abc" });
       expect(log.sample_rate).toBeUndefined();
+      // ClaudeBot's vendor (Anthropic) publishes no IP list, so the verdict is
+      // unknown — NOT a false "spoof".
+      expect(log.verified).toBeUndefined();
+      expect(log.verified_by).toBeUndefined();
+    });
+
+    // vendor range URLs end in .json; everything else (the ingest POST) is 204.
+    const mockVendorRanges = () =>
+      fetchSpy.mockImplementation((url: unknown) =>
+        Promise.resolve(
+          typeof url === "string" && url.endsWith(".json")
+            ? new Response(
+                JSON.stringify({ prefixes: [{ ipv4Prefix: "1.2.3.0/24" }] }),
+                { status: 200 },
+              )
+            : new Response(null, { status: 204 }),
+        ),
+      );
+
+    const ingestLog = () => {
+      const ingest = fetchSpy.mock.calls.find(
+        (c) => (c[1] as RequestInit)?.body !== undefined,
+      );
+      expect(ingest).toBeDefined();
+      return JSON.parse((ingest![1] as RequestInit).body as string)[0];
+    };
+
+    it("stamps verified=true for a publishing vendor whose IP is in range", async () => {
+      mockVendorRanges();
+      const req = buildRequest("https://example.com/", {
+        "user-agent": "Mozilla/5.0 (compatible; GPTBot/1.1)",
+        "cf-connecting-ip": "1.2.3.4",
+      });
+
+      await forwardLog(req, buildResponse(), baseEnv);
+
+      const log = ingestLog();
+      expect(log.verified).toBe(true);
+      expect(log.verified_by).toBe("edge_cidr");
+      expect(log.ip).toBeNull();
+    });
+
+    it("stamps verified=false for a publishing vendor whose IP is out of range (real spoof)", async () => {
+      mockVendorRanges();
+      const req = buildRequest("https://example.com/", {
+        "user-agent": "Mozilla/5.0 (compatible; GPTBot/1.1)",
+        "cf-connecting-ip": "9.9.9.9",
+      });
+
+      await forwardLog(req, buildResponse(), baseEnv);
+
+      const log = ingestLog();
+      expect(log.verified).toBe(false);
+      expect(log.verified_by).toBe("edge_cidr");
+    });
+
+    it("leaves the verdict unknown for a vendor with no published list, even when ranges load", async () => {
+      mockVendorRanges();
+      // Bytespider (ByteDance) publishes no list — a CIDR miss must not become
+      // a false "spoof".
+      const req = buildRequest("https://example.com/", {
+        "user-agent": "Bytespider; spider-feedback@bytedance.com",
+        "cf-connecting-ip": "9.9.9.9",
+      });
+
+      await forwardLog(req, buildResponse(), baseEnv);
+
+      const log = ingestLog();
+      expect(log.verified).toBeUndefined();
+      expect(log.verified_by).toBeUndefined();
+      expect(log.ip).toBeNull(); // still dropped — privacy unaffected by verdict
     });
 
     it("drops non-AI traffic when the sample roll misses", async () => {
@@ -255,6 +327,28 @@ describe("classifyRequest", () => {
   it("does not over-match lookalike domains", () => {
     // "notclaude.ai" must not match "claude.ai" — label-boundary stripping only.
     expect(classifyRequest("Mozilla/5.0", "https://notclaude.ai/")).toBeNull();
+  });
+});
+
+describe("isVerifiableBotUA", () => {
+  it("is true for vendors that publish IP ranges (OpenAI / Google / Perplexity)", () => {
+    expect(isVerifiableBotUA("Mozilla/5.0 (compatible; GPTBot/1.1)")).toBe(true);
+    expect(isVerifiableBotUA("ChatGPT-User/1.0")).toBe(true);
+    expect(isVerifiableBotUA("PerplexityBot/1.0")).toBe(true);
+    expect(isVerifiableBotUA("Mozilla/5.0 (compatible; GoogleOther)")).toBe(true);
+  });
+
+  it("is false for vendors with no published list (would otherwise read as spoof)", () => {
+    expect(isVerifiableBotUA("Mozilla/5.0 (compatible; ClaudeBot/1.0)")).toBe(false);
+    expect(isVerifiableBotUA("meta-externalagent/1.1")).toBe(false);
+    expect(isVerifiableBotUA("Bytespider; spider-feedback@bytedance.com")).toBe(false);
+    expect(isVerifiableBotUA("MistralAI-User/1.0")).toBe(false);
+  });
+
+  it("is false for null/empty and matches case-insensitively", () => {
+    expect(isVerifiableBotUA(null)).toBe(false);
+    expect(isVerifiableBotUA("")).toBe(false);
+    expect(isVerifiableBotUA("MOZILLA/5.0 (COMPATIBLE; GPTBOT/1.0)")).toBe(true);
   });
 });
 

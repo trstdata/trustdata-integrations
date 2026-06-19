@@ -379,6 +379,38 @@ export const BOT_IP_RANGE_URLS = [
   "https://www.perplexity.com/perplexity-user.json",
 ];
 
+// Only these vendors PUBLISH an IP-range list (the BOT_IP_RANGE_URLS above), so
+// only their bots can be IP-verified. Every other AI bot — Anthropic, Meta,
+// ByteDance, Mistral, Amazon, … — has no list to check against, so a CIDR miss
+// means "we can't tell", not "spoof". For those we leave `verified` unset
+// (unknown) rather than stamp a false negative that downstream reads as a
+// spoof. Keep this list in sync with BOT_IP_RANGE_URLS; mirrors the server
+// verifier's StatusUnknown fail-open (botverify.go).
+export const VERIFIABLE_BOT_UAS = [
+  // OpenAI
+  "gptbot",
+  "oai-searchbot",
+  "chatgpt-user",
+  // Google
+  "googleother",
+  "google-cloudvertexbot",
+  "google-notebooklm",
+  "gemini-deep-research",
+  // Perplexity
+  "perplexitybot",
+  "perplexity-user",
+];
+
+// isVerifiableBotUA reports whether the matched bot belongs to a vendor we hold
+// published IP ranges for. Substring match, mirroring classifyRequest.
+export function isVerifiableBotUA(userAgent: string | null): boolean {
+  if (!userAgent) {
+    return false;
+  }
+  const lower = userAgent.toLowerCase();
+  return VERIFIABLE_BOT_UAS.some((ua) => lower.includes(ua));
+}
+
 export const BOTIP_CACHE_KEY = "aibotips:v1";
 export const BOTIP_KV_TTL_SECONDS = 21600; // 6 h
 export const BOTIP_MEMORY_TTL_MS = 10 * 60 * 1000;
@@ -875,7 +907,11 @@ export async function forwardLog(
     if (sigResult !== "unknown") {
       log.verified = sigResult === "verified";
       log.verified_by = "signature";
-    } else {
+    } else if (isVerifiableBotUA(userAgent)) {
+      // CIDR fallback only for vendors that publish an IP-range list. Bots from
+      // vendors with no published ranges stay verified=unknown (unset) — see
+      // isVerifiableBotUA — so we never stamp a false negative that reads as a
+      // spoof downstream.
       const ranges = await getBotIPRanges(env);
       if (ranges.length > 0) {
         log.verified = ipInRanges(log.ip, ranges);
