@@ -1,0 +1,15 @@
+{
+  "$schema": "https://code.claude.com/schemas/marketplace.json",
+  "name": "trustdata",
+  "owner": {
+    "name": "TrustData",
+    "url": "https://trustdata.tech"
+  },
+  "plugins": [
+    {
+      "name": "trustdata",
+      "source": "./",
+      "description": "The TrustData skill and MCP server for AI agents"
+    }
+  ]
+}
