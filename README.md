@@ -1,6 +1,6 @@
 # TrustData Integrations
 
-Customer-deployed integrations for [TrustData](https://trustdata.tech) — the code you run on your own infrastructure to send data into the TrustData platform.
+Customer-deployed integrations for [TrustData](https://trustdata.tech) — the code you run on your own infrastructure to send data into the TrustData platform, plus the skill your AI agent runs to read it back out.
 
 This repo is **MIT-licensed** and intentionally thin. The TrustData product (Django app, ClickHouse marts, attribution engine) is a separate, private codebase — everything here is the glue that connects your stack to our ingest endpoints.
 
@@ -12,6 +12,7 @@ This repo is **MIT-licensed** and intentionally thin. The TrustData product (Dja
 | WooCommerce plugin | [`woocommerce/`](./woocommerce) | WordPress + WooCommerce | PHP |
 | PrestaShop module | [`prestashop/`](./prestashop) | PrestaShop | PHP |
 | Shopify pixel | [`shopify/pixel/`](./shopify/pixel) | Shopify Customer Events | TypeScript |
+| Agent skill | [`skills/trustdata/`](./skills/trustdata) | Claude Code, Cursor, any MCP client | Markdown |
 
 Each directory has its own README with install, configuration, and local-dev instructions.
 
@@ -19,7 +20,10 @@ Each directory has its own README with install, configuration, and local-dev ins
 
 You need a TrustData account and at least one **property** (attribution ID) to send data to. Sign up at [trustdata.tech](https://trustdata.tech) or email `hello@trustdata.tech`.
 
-Each integration takes:
+The agent skill is the exception: it reads data rather than sending it, and it
+authenticates over OAuth, so it needs no key.
+
+Each of the other integrations takes:
 
 - `TRUSTDATA_API_KEY` — from **Settings → Data Sources** in the dashboard
 - `TRUSTDATA_ATTRIBUTION_ID` — your TrustData attribution ID for the property you're sending data for

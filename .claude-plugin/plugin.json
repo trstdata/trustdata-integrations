@@ -1,0 +1,9 @@
+{
+  "name": "trustdata",
+  "description": "Query TrustData marketing analytics from your agent: traffic, conversions, attribution, paid performance, SEO rankings and AI search visibility",
+  "version": "1.0.0",
+  "author": {
+    "name": "TrustData",
+    "url": "https://trustdata.tech"
+  }
+}

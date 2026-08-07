@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "trustdata": {
+      "type": "http",
+      "url": "https://mcp.trustdata.tech/mcp/"
+    }
+  }
+}
