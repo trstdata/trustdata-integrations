@@ -43,7 +43,6 @@ property id, and an organization usually has several.
 - Prompts tracked for probing: `list_brand_prompts`
 - Competitors tracked: `list_competitors`
 - Domains LLMs cite that do not link back: `list_citation_gaps`
-- Run a probe now: `run_probe`
 
 **SEO**
 - Rankings joined with volume and difficulty: `list_seo_keywords`
@@ -121,9 +120,6 @@ rule covers GEO probes, citation gaps, and share of voice.
 Every tool needs a scope on the API token. A missing scope returns an error
 naming the scope. Tell the user which scope to add and where. Do not retry the
 call.
-
-`run_probe` bills per engine call. Confirm with the user before running probes
-in a loop.
 
 ## Limits
 
