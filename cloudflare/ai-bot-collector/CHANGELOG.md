@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.0
+
+**Every forwarded event now reports which Worker build produced it.**
+
+Until now a deployed Worker had no version anywhere — not in events, not in the
+bundle — so neither TrustData nor the customer could answer "am I up to date?".
+
+- New `WORKER_VERSION` constant, sent as `worker_version` on every forwarded
+  event. The ingest endpoint ignores unknown fields, so mixed fleets are fine.
+- `worker.bundle.js` now carries the version on line 1, so paste-deploy users
+  can read their version straight from the top of the Cloudflare code editor.
+- A test pins `WORKER_VERSION` to package.json's `version` so they can't drift.
+
+> **Updating:** copy the latest `src/index.ts`, `package.json` and
+> `package-lock.json` into your repo and let Cloudflare redeploy (paste
+> deploys: repaste `worker.bundle.js`) — see
+> [Upgrading](https://docs.trustdata.tech/connectors/cloudflare-ai-crawlers#upgrading).
+> Never copy `wrangler.jsonc`: yours holds your KV namespace id and variables.
+
 ## 0.3.1
 
 **Fix: `npm ci` failed during Cloudflare deploys — no Worker code changed.**
@@ -23,8 +42,11 @@ peers and got a version the lock contradicted.
   `@cloudflare/vitest-pool-workers` 0.21, vitest 4.1.10), clearing 9 advisories
   in Miniflare's `undici`/`ws` — all dev-time only. `npm audit` is now clean.
 
-> **Updating:** sync your fork and retry the deploy. Nothing about the Worker's
-> runtime behaviour changed — `worker.bundle.js` is byte-identical to 0.3.0.
+> **Updating:** copy the latest `package.json`, `package-lock.json`,
+> `.node-version` and `src/index.ts` from this repo into yours and retry the
+> deploy. (Your repo is a clone created by the Deploy button, not a fork — there
+> is no "Sync fork" button.) Nothing about the Worker's runtime behaviour
+> changed — `worker.bundle.js` is byte-identical to 0.3.0.
 
 ## 0.3.0
 
@@ -45,9 +67,10 @@ flagged as spoofs when the honest verdict is "unknown".
 - Raw IP is still dropped for every bot; real spoofs (e.g. a fake GPTBot from a
   non-OpenAI IP) are still caught.
 
-> **Updating:** sync your fork and let Cloudflare redeploy. This is the last
-> verification-logic redeploy you'll need — future verifiable-vendor changes
-> propagate automatically via config sync.
+> **Updating:** copy the latest `src/index.ts` from this repo into yours and
+> let Cloudflare redeploy. This is the last verification-logic redeploy you'll
+> need — future verifiable-vendor changes propagate automatically via config
+> sync.
 
 ## 0.2.0
 

@@ -1,7 +1,9 @@
+// trustdata-ai-bot-collector v0.4.0
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
 // src/index.ts
+var WORKER_VERSION = "0.4.0";
 var EMBEDDED_VERIFIABLE_ENGINES = /* @__PURE__ */ new Set(["openai", "google", "perplexity"]);
 var EMBEDDED_BOT_PATTERNS = [
   // OpenAI
@@ -642,6 +644,7 @@ async function forwardLog(request, response, env) {
   );
   const log = {
     timestamp: Date.now(),
+    worker_version: WORKER_VERSION,
     attribution_id: env.TRUSTDATA_ATTRIBUTION_ID ?? "",
     host: url.hostname,
     method: request.method,
@@ -783,6 +786,7 @@ export {
   WEBMCP_CACHE_KEY_PREFIX,
   WEBMCP_CACHE_TTL_SECONDS,
   WEBMCP_PATH,
+  WORKER_VERSION,
   _resetBotIPCache,
   _resetBotListCache,
   anonymizeIp,

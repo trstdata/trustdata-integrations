@@ -33,9 +33,11 @@ import {
   buildSignatureBase,
   parseSignatureInput,
   jwkThumbprint,
+  WORKER_VERSION,
   type CidrRange,
   type Env,
 } from "../src/index";
+import pkg from "../package.json";
 
 describe("forwardLog", () => {
   const baseEnv: Env = {
@@ -93,6 +95,11 @@ describe("forwardLog", () => {
     expect(log.ip).toBeNull(); // AI referral — IP not forwarded
     expect(log.status).toBe(200);
     expect(typeof log.timestamp).toBe("number");
+    expect(log.worker_version).toBe(WORKER_VERSION);
+  });
+
+  it("keeps WORKER_VERSION in sync with package.json", () => {
+    expect(WORKER_VERSION).toBe(pkg.version);
   });
 
   it("is a no-op when ingest URL or API key is missing", async () => {

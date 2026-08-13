@@ -68,7 +68,7 @@ The button will:
 >
 > Then the Worker wraps every request your zone serves and fires AI-bot logs to TrustData,
 > fire-and-forget. **Tip (Git-connected / button deploys only):** to keep the route across
-> redeploys, add a `routes` block with your own `zone_name` to your fork's `wrangler.jsonc`.
+> redeploys, add a `routes` block with your own `zone_name` to your repo's `wrangler.jsonc`.
 
 ### API key is a secret by default
 
@@ -83,7 +83,7 @@ as an **encrypted secret** (write-only, hidden from the dashboard), never plaint
 
 ## No GitHub or GitLab account? Paste the Worker
 
-The Deploy button forks this repo into a Git account. If you don't have one, build the Worker by hand in the Cloudflare dashboard — copy-paste, no terminal, no Git:
+The Deploy button clones this repo into a Git account you own. If you don't have one, build the Worker by hand in the Cloudflare dashboard — copy-paste, no terminal, no Git:
 
 1. **Workers & Pages → Create → Start with Hello World → Deploy**, then open the Worker and click **Edit code**.
 2. Open [`worker.bundle.js`](worker.bundle.js) — a pre-built single-file JS copy of the Worker — click **Copy raw file** on GitHub, and paste it over the default code (replace everything). Click **Deploy**.
@@ -92,6 +92,10 @@ The Deploy button forks this repo into a Git account. If you don't have one, bui
 5. **Settings → Domains & Routes** — add a route `*.yourdomain.com/*`.
 
 > `worker.bundle.js` is generated from `src/`. Maintainers: regenerate it with `npm run bundle` after any source change so the paste path stays in sync.
+
+## Upgrading
+
+The Worker syncs its bot lists from TrustData at runtime, so most improvements need no redeploy. When a code release does ship (see [CHANGELOG](CHANGELOG.md)), copy the changed files from this repo into yours and push — **never** `wrangler.jsonc` (yours holds your KV id and variables), and never re-click the Deploy button (it creates a second repo and Worker instead of updating yours). Full procedure, including the paste-deploy path and how to check your version: [Upgrading in the docs](https://docs.trustdata.tech/connectors/cloudflare-ai-crawlers#upgrading).
 
 ## Alternative — Logpush (if your Cloudflare plan includes it)
 

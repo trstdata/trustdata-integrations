@@ -28,6 +28,11 @@
  * we can grow into larger batches without changing the wire format.
  */
 
+// Stamped on every forwarded event as `worker_version` so TrustData can tell
+// which build a zone runs (and who is stale when a fix ships). Must match
+// package.json "version" — a test enforces the sync. Bump on every release.
+export const WORKER_VERSION = "0.4.0";
+
 export interface Env {
   TRUSTDATA_INGEST_URL: string;
   TRUSTDATA_API_KEY: string;
@@ -55,6 +60,8 @@ export interface Env {
 
 export interface LogEntry {
   timestamp: number;
+  // Which build of this Worker produced the event (WORKER_VERSION).
+  worker_version: string;
   attribution_id: string;
   host: string;
   method: string;
@@ -899,6 +906,7 @@ export async function forwardLog(
 
   const log: LogEntry = {
     timestamp: Date.now(),
+    worker_version: WORKER_VERSION,
     attribution_id: env.TRUSTDATA_ATTRIBUTION_ID ?? "",
     host: url.hostname,
     method: request.method,
