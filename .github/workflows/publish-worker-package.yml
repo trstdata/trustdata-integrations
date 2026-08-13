@@ -1,0 +1,77 @@
+# Publishes @trustdata/ai-bot-collector to npm when its version changes.
+#
+# Uses npm trusted publishing (OIDC): no NPM_TOKEN secret exists in this repo —
+# npm verifies the workflow identity directly and attaches a provenance
+# attestation, so anyone can verify a release was built from this source.
+#
+# The job runs on every push touching the package, and the version guard makes
+# it a no-op unless package.json's version is not yet on the registry. To cut a
+# release: bump version + WORKER_VERSION, update CHANGELOG, merge to main.
+name: Publish @trustdata/ai-bot-collector
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cloudflare/ai-bot-collector-src/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for npm trusted publishing
+
+concurrency:
+  group: publish-ai-bot-collector
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: cloudflare/ai-bot-collector-src
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: cloudflare/ai-bot-collector-src/.node-version
+          registry-url: https://registry.npmjs.org
+
+      # Same npm pin as the test workflow, so `npm ci` reads the lockfile the
+      # same way Cloudflare's build image does.
+      - name: Install the npm version used by Workers Builds
+        run: |
+          PINNED="$(node -p "require('./package.json').packageManager")"
+          npm install -g "$PINNED"
+          test "$(npm --version)" = "${PINNED#npm@}" \
+            || { echo "npm is $(npm --version), expected ${PINNED#npm@}"; exit 1; }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check whether this version is already published
+        id: guard
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "@trustdata/ai-bot-collector@$VERSION" version >/dev/null 2>&1; then
+            echo "v$VERSION is already on the registry — nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$VERSION is new — publishing."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Trusted publishing needs a newer npm than Workers Builds pins, so switch
+      # only for the publish step — the install above already used the pinned one.
+      - name: Upgrade npm for trusted publishing
+        if: steps.guard.outputs.publish == 'true'
+        run: npm install -g npm@latest
+
+      # access + provenance come from publishConfig in package.json.
+      # prepublishOnly re-runs typecheck, tests and the build before upload.
+      - name: Publish
+        if: steps.guard.outputs.publish == 'true'
+        run: npm publish

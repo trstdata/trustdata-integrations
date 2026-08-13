@@ -21,7 +21,10 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "trustdata-ai-bot-collector",
-  "main": "src/index.ts",
+  // src/index.js is a one-line re-export of the @trustdata/ai-bot-collector npm
+  // package, which holds the Worker's code and is pinned in package.json.
+  // Upgrades arrive as a pull request you merge — never edit this file.
+  "main": "src/index.js",
   "compatibility_date": "2026-01-01",
   "observability": { "enabled": true },
   "vars": {

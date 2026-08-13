@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.5.0
+
+**Updates now arrive as a pull request you merge.**
+
+The Worker's code moved out of the repo you deploy and into an npm package,
+[`@trustdata/ai-bot-collector`](https://www.npmjs.com/package/@trustdata/ai-bot-collector).
+Your repo keeps only what is yours — `wrangler.jsonc`, a one-line `src/index.js`,
+and the version pin — so upgrading is no longer a file-copying exercise.
+
+- New repos created by the Deploy button ship a `.github/dependabot.yml`: once a
+  week, if a new Worker version exists, Dependabot opens a single PR bumping the
+  pin. Merging it redeploys through Cloudflare's build. Nothing to copy, and
+  `wrangler.jsonc` is never touched by an update.
+- The dependency tree a customer installs went from 85 packages to 2. The class of
+  failure behind 0.3.1 (a lockfile Cloudflare's npm refused to install) is gone
+  rather than documented around.
+- Releases are published from CI with npm provenance, so the package on npm is
+  verifiably built from this repository.
+- The Worker's runtime behaviour is unchanged: same classification, same payload,
+  now reporting `worker_version: "0.5.0"`.
+- `worker.bundle.js` keeps its location and URL for paste deploys; its line-1
+  banner now reads `// @trustdata/ai-bot-collector v0.5.0`.
+
+> **Updating from 0.3.x / 0.4.x:** your repo holds the Worker's source, so it needs
+> a one-time migration to the new shape (five files, all editable in the GitHub web
+> UI) — see
+> [Upgrading](https://docs.trustdata.tech/connectors/cloudflare-ai-crawlers#upgrading).
+> Until you migrate, the file-copy procedure keeps working; nothing breaks on its own.
+
 ## 0.4.0
 
 **Every forwarded event now reports which Worker build produced it.**

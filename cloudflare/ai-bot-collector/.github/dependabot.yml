@@ -1,0 +1,20 @@
+# Keeps this Worker up to date without you tracking releases.
+#
+# Once a week Dependabot opens a single pull request when a new version of the
+# TrustData collector (or of Wrangler, which deploys it) is available. Review it
+# and click Merge — Cloudflare rebuilds and redeploys the Worker on the push, so
+# there is nothing else to run. Your wrangler.jsonc, KV binding, variables and
+# route are never touched by these updates.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    allow:
+      - dependency-name: "@trustdata/*"
+      - dependency-name: "wrangler"
+    groups:
+      trustdata-worker:
+        patterns: ["*"]
