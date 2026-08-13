@@ -1,0 +1,34 @@
+# Keeps the Worker's dev toolchain (wrangler, vitest, typescript) patched.
+# Every dependency here is a devDependency — none of it ships to the edge — but
+# stale tooling is how lockfiles rot, so refresh it on a schedule.
+#
+# Note: Dependabot regenerates the lockfile with its own npm. If that npm writes
+# a lockfile the Workers Builds npm cannot install, the Cloudflare Worker
+# workflow turns red on the PR — regenerate the lockfile locally with the npm
+# pinned in package.json's packageManager field before merging.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /cloudflare/ai-bot-collector
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      worker-dev-dependencies:
+        dependency-type: development
+
+  # The pixel's only real dependency is the vendored ../core package, which
+  # Dependabot cannot see; these are the Shopify CLI and extension tooling.
+  - package-ecosystem: npm
+    directory: /shopify/pixel
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      pixel-dev-dependencies:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

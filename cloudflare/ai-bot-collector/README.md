@@ -131,6 +131,22 @@ Logpush hits the Go server's `/v1/logs/cloudflare_logpush` endpoint (NDJSON). Sa
 npm test   # Vitest unit tests — no Cloudflare account needed
 ```
 
+### Toolchain
+
+Cloudflare's Workers Builds image pairs Node 24.18.0 with npm 10.9.2, and npm 10
+and npm 11 disagree about how optional peer dependencies are recorded in a
+lockfile. A lockfile written by the wrong npm still works locally but fails
+`npm ci` on Cloudflare, breaking every customer deploy. Both versions are pinned
+in the repo — `.node-version` and the `packageManager` field in `package.json` —
+so **regenerate the lockfile with the pinned npm**:
+
+```bash
+npx npm@10.9.2 install    # after changing any dependency
+```
+
+CI runs `npm ci` with that same npm, so drift fails the build rather than a
+customer's deploy.
+
 ## How it works
 
 ### AI-bot ingestion

@@ -4,13 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "shopify app dev",
-    "deploy": "shopify app deploy"
+    "deploy": "shopify app deploy",
+    "typecheck": "tsc --noEmit",
+    "verify:core": "node scripts/verify-core-imports.mjs"
   },
   "dependencies": {
     "@trustdata/tracking-core": "file:../core"
   },
   "devDependencies": {
     "@shopify/cli": "^3.75.0",
-    "@shopify/web-pixels-extension": "^1.0.0"
+    "@shopify/web-pixels-extension": "^1.0.0",
+    "typescript": "^5.9.3"
   }
 }
