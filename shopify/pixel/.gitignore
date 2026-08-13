@@ -1,2 +1,5 @@
+node_modules/
+
 # Shopify CLI build outputs
 dist/
+.shopify/

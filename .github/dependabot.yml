@@ -17,6 +17,17 @@ updates:
       worker-dev-dependencies:
         dependency-type: development
 
+  # The pixel's only real dependency is the vendored ../core package, which
+  # Dependabot cannot see; these are the Shopify CLI and extension tooling.
+  - package-ecosystem: npm
+    directory: /shopify/pixel
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      pixel-dev-dependencies:
+        dependency-type: development
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

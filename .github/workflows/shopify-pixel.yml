@@ -1,0 +1,45 @@
+# Typechecks the Shopify Web Pixel extension against the vendored
+# @trustdata/tracking-core package. The pixel imports that package from four
+# source files, so this job is what proves the two directories stay in sync —
+# `npm ci` alone passes even when ../core is missing, leaving a dangling
+# node_modules symlink and an extension that cannot build.
+name: Shopify Pixel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "shopify/**"
+      - ".github/workflows/shopify-pixel.yml"
+  pull_request:
+    paths:
+      - "shopify/**"
+      - ".github/workflows/shopify-pixel.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: shopify/pixel
+
+jobs:
+  build:
+    name: Install and typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: shopify/pixel/.node-version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
