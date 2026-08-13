@@ -1,0 +1,61 @@
+# Verifies the ai-bot-collector Worker the same way a customer's Cloudflare
+# Workers Build does, so a broken lockfile or a failing build is caught here
+# instead of in a client's deploy log.
+name: Cloudflare Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cloudflare/ai-bot-collector/**"
+      - ".github/workflows/cloudflare-worker.yml"
+  pull_request:
+    paths:
+      - "cloudflare/ai-bot-collector/**"
+      - ".github/workflows/cloudflare-worker.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: cloudflare/ai-bot-collector
+
+jobs:
+  build:
+    name: Install, typecheck, test, dry-run deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: cloudflare/ai-bot-collector/.node-version
+
+      # Cloudflare's Workers Builds image pairs Node 24.18.0 with npm 10.9.2,
+      # not the npm that ships with Node 24. npm 10 and npm 11 disagree about
+      # how optional peer dependencies are recorded, so a lockfile written by
+      # npm 11 can fail `npm ci` on Cloudflare. Match their npm exactly, read
+      # from package.json's packageManager field so there is one source of truth.
+      - name: Install the npm version used by Workers Builds
+        run: npm install -g "$(node -p "require('./package.json').packageManager")"
+
+      # `npm ci` fails if package.json and package-lock.json are out of sync —
+      # this step is the guard against shipping a lockfile customers can't install.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Builds the Worker exactly as `wrangler deploy` would, without uploading
+      # it, so no Cloudflare credentials are needed.
+      - name: Build Worker (dry run)
+        run: npx wrangler deploy --dry-run
