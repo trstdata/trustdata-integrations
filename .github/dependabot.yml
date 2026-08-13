@@ -8,8 +8,26 @@
 # pinned in package.json's packageManager field before merging.
 version: 2
 updates:
+  # The deployment shell customers clone. It depends on the published Worker
+  # package, so these PRs are the same ones customers receive — we merge ours
+  # first and find out about a bad release before they do. After publishing a
+  # new version, trigger this from Insights → Dependency graph → Dependabot
+  # rather than waiting up to a week.
   - package-ecosystem: npm
     directory: /cloudflare/ai-bot-collector
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    allow:
+      - dependency-name: "@trustdata/*"
+      - dependency-name: "wrangler"
+    groups:
+      trustdata-worker:
+        patterns: ["*"]
+
+  # The Worker package's own dev toolchain (wrangler, vitest, typescript).
+  - package-ecosystem: npm
+    directory: /cloudflare/ai-bot-collector-src
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

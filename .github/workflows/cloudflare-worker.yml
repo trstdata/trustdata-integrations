@@ -1,6 +1,8 @@
-# Verifies the ai-bot-collector Worker the same way a customer's Cloudflare
-# Workers Build does, so a broken lockfile or a failing build is caught here
-# instead of in a client's deploy log.
+# Verifies both halves of the ai-bot-collector: the npm package that holds the
+# Worker's code, and the deployment shell customers clone with the Deploy to
+# Cloudflare button. The shell job installs the package from the registry the
+# same way a customer's Cloudflare build does, so a release that customers
+# cannot install is caught here instead of in a client's deploy log.
 name: Cloudflare Worker
 
 on:
@@ -8,10 +10,12 @@ on:
     branches: [main]
     paths:
       - "cloudflare/ai-bot-collector/**"
+      - "cloudflare/ai-bot-collector-src/**"
       - ".github/workflows/cloudflare-worker.yml"
   pull_request:
     paths:
       - "cloudflare/ai-bot-collector/**"
+      - "cloudflare/ai-bot-collector-src/**"
       - ".github/workflows/cloudflare-worker.yml"
 
 permissions:
@@ -21,20 +25,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-defaults:
-  run:
-    working-directory: cloudflare/ai-bot-collector
-
 jobs:
-  build:
-    name: Install, typecheck, test, dry-run deploy
+  package:
+    name: Package — install, typecheck, test, bundle
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare/ai-bot-collector-src
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
         with:
-          node-version-file: cloudflare/ai-bot-collector/.node-version
+          node-version-file: cloudflare/ai-bot-collector-src/.node-version
 
       # Cloudflare's Workers Builds image pairs Node 24.18.0 with npm 10.9.2,
       # not the npm that ships with Node 24. npm 10 and npm 11 disagree about
@@ -55,8 +58,6 @@ jobs:
           test "$(npm --version)" = "${PINNED#npm@}" \
             || { echo "npm is $(npm --version), expected ${PINNED#npm@}"; exit 1; }
 
-      # `npm ci` fails if package.json and package-lock.json are out of sync —
-      # this step is the guard against shipping a lockfile customers can't install.
       - name: Install dependencies
         run: npm ci
 
@@ -66,12 +67,46 @@ jobs:
       - name: Test
         run: npm test
 
-      # Builds the Worker exactly as `wrangler deploy` would, without uploading it,
-      # so no Cloudflare credentials are needed, then checks the result against the
-      # committed bundle. worker.bundle.js is a customer install path in its own
-      # right (README: paste it into the dashboard), so a source change that never
+      # worker.bundle.js is a customer install path in its own right (paste it
+      # into the Cloudflare dashboard editor), so a source change that never
       # reaches it ships stale code to everyone who installed that way.
-      - name: Build Worker and check the committed bundle is current
+      - name: Rebuild the pasteable bundle and check the committed copy is current
         run: |
           npm run bundle
-          git diff --exit-code worker.bundle.js
+          git diff --exit-code -- ../ai-bot-collector/worker.bundle.js
+
+  shell:
+    name: Shell — install from registry, dry-run deploy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare/ai-bot-collector
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: cloudflare/ai-bot-collector/.node-version
+
+      - name: Install the npm version used by Workers Builds
+        run: |
+          PINNED="$(node -p "require('./package.json').packageManager")"
+          case "$PINNED" in
+            npm@*) ;;
+            *) echo "packageManager must pin npm, got '$PINNED'"; exit 1 ;;
+          esac
+          npm install -g "$PINNED"
+          test "$(npm --version)" = "${PINNED#npm@}" \
+            || { echo "npm is $(npm --version), expected ${PINNED#npm@}"; exit 1; }
+
+      # Installs @trustdata/ai-bot-collector from the registry, exactly as a
+      # customer's Cloudflare build does. A shell pinned to a version that is not
+      # published yet fails here rather than in every new customer's first deploy.
+      - name: Install dependencies
+        run: npm ci
+
+      # Builds the Worker as `wrangler deploy` would, without uploading it, so no
+      # Cloudflare credentials are needed. Proves src/index.js resolves the
+      # package through its exports map and that the result is a valid Worker.
+      - name: Dry-run deploy
+        run: npx wrangler deploy --dry-run

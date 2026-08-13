@@ -1,0 +1,55 @@
+{
+  "name": "@trustdata/ai-bot-collector",
+  "version": "0.5.0",
+  "description": "Cloudflare Worker that classifies AI traffic at the edge and forwards it to TrustData, plus an anonymized baseline sample.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/trstdata/trustdata-integrations.git",
+    "directory": "cloudflare/ai-bot-collector-src"
+  },
+  "homepage": "https://docs.trustdata.tech/connectors/cloudflare-ai-crawlers",
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "ai-crawlers",
+    "gptbot",
+    "analytics",
+    "trustdata"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "npm@10.9.2",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "bundle": "npm run build && node tools/bundle.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.21.2",
+    "@cloudflare/workers-types": "^5.20260813.1",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.122.0"
+  }
+}

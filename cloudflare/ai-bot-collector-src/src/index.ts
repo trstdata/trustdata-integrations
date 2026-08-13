@@ -31,7 +31,7 @@
 // Stamped on every forwarded event as `worker_version` so TrustData can tell
 // which build a zone runs (and who is stale when a fix ships). Must match
 // package.json "version" — a test enforces the sync. Bump on every release.
-export const WORKER_VERSION = "0.4.0";
+export const WORKER_VERSION = "0.5.0";
 
 export interface Env {
   TRUSTDATA_INGEST_URL: string;

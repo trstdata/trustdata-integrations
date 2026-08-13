@@ -1,25 +1,20 @@
 {
   "name": "trustdata-ai-bot-collector",
-  "version": "0.4.0",
-  "description": "Cloudflare Worker that classifies AI traffic at the edge and forwards it to TrustData, plus an anonymized baseline sample.",
+  "version": "0.5.0",
+  "description": "Deployment shell for the TrustData AI bot collector Worker. The Worker itself ships as @trustdata/ai-bot-collector.",
   "private": true,
-  "main": "src/index.ts",
   "engines": {
     "node": ">=22.0.0"
   },
   "packageManager": "npm@10.9.2",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "bundle": "wrangler deploy --dry-run --outdir dist && node tools/bundle.mjs"
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@trustdata/ai-bot-collector": "0.5.0"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.21.2",
-    "@cloudflare/workers-types": "^5.20260813.1",
-    "typescript": "^5.4.0",
-    "vitest": "^4.1.10",
-    "wrangler": "^4.122.0"
+    "wrangler": "4.122.0"
   }
 }

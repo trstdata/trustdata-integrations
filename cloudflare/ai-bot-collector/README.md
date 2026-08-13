@@ -48,10 +48,15 @@ The Deploy to Cloudflare button walks you through the whole setup in your browse
 3. A Cloudflare account with a zone you control.
 
 The button will:
-- Clone this repo into your GitHub or GitLab account
+- Clone this directory into your GitHub or GitLab account
 - Prompt for `TRUSTDATA_API_KEY`, `TRUSTDATA_ATTRIBUTION_ID`, and the KV namespace name
 - Auto-provision the KV namespace
 - Deploy the Worker
+
+The repo you get is small on purpose: `wrangler.jsonc` (your config), a one-line
+`src/index.js`, and a `package.json` pinning the Worker itself — which ships as the
+[`@trustdata/ai-bot-collector`](https://www.npmjs.com/package/@trustdata/ai-bot-collector)
+npm package. Updates arrive as pull requests you merge; see [Upgrading](#upgrading).
 
 > ## ⚠️ Required after deploy: add your route
 >
@@ -91,11 +96,35 @@ The Deploy button clones this repo into a Git account you own. If you don't have
 4. **Settings → Bindings → Add → KV namespace** — create one and bind it as `WEBMCP_CACHE` (optional; skip to disable manifest caching).
 5. **Settings → Domains & Routes** — add a route `*.yourdomain.com/*`.
 
-> `worker.bundle.js` is generated from `src/`. Maintainers: regenerate it with `npm run bundle` after any source change so the paste path stays in sync.
+> `worker.bundle.js` is generated from the published package. Maintainers: regenerate it with `npm run bundle` in [`../ai-bot-collector-src`](../ai-bot-collector-src) after any source change so the paste path stays in sync — CI fails if it drifts.
 
 ## Upgrading
 
-The Worker syncs its bot lists from TrustData at runtime, so most improvements need no redeploy. When a code release does ship (see [CHANGELOG](CHANGELOG.md)), copy the changed files from this repo into yours and push — **never** `wrangler.jsonc` (yours holds your KV id and variables), and never re-click the Deploy button (it creates a second repo and Worker instead of updating yours). Full procedure, including the paste-deploy path and how to check your version: [Upgrading in the docs](https://docs.trustdata.tech/connectors/cloudflare-ai-crawlers#upgrading).
+The Worker syncs its bot lists from TrustData at runtime, so most improvements
+reach you with no redeploy at all. When the Worker's own code changes, the update
+comes to you:
+
+- **Deployed with the button (GitHub):** [Dependabot](.github/dependabot.yml) opens a
+  pull request titled *Bump @trustdata/ai-bot-collector*. Review it and click **Merge** —
+  Cloudflare rebuilds and redeploys on the push. Nothing else to do.
+- **Deployed with the button (GitLab):** no Dependabot, so bump the
+  `@trustdata/ai-bot-collector` version in `package.json` yourself, run
+  `npx npm@10.9.2 install` to refresh the lockfile, and push.
+- **Pasted into the dashboard:** repaste [`worker.bundle.js`](worker.bundle.js) over the
+  code in **Edit code**. Your variables, secrets, bindings and route are kept.
+
+Never re-click the Deploy button to upgrade — it creates a *second* repo and Worker
+and orphans your original. Never edit `wrangler.jsonc` for an upgrade either; yours
+holds your KV namespace id and variables. Repos created before v0.5.0 contain the
+Worker's source and upgrade differently — see
+[Upgrading in the docs](https://docs.trustdata.tech/connectors/cloudflare-ai-crawlers#upgrading)
+for that one-time migration, plus how to check which version you're running.
+
+## Where's the Worker's code?
+
+In [`../ai-bot-collector-src`](../ai-bot-collector-src), published to npm as
+`@trustdata/ai-bot-collector` with [provenance](https://docs.npmjs.com/generating-provenance-statements)
+from this repo's CI. This directory is only the deployment shell.
 
 ## Alternative — Logpush (if your Cloudflare plan includes it)
 
@@ -131,9 +160,15 @@ Logpush hits the Go server's `/v1/logs/cloudflare_logpush` endpoint (NDJSON). Sa
 
 ## Testing
 
+The Worker's tests live with its source in [`../ai-bot-collector-src`](../ai-bot-collector-src):
+
 ```bash
-npm test   # Vitest unit tests — no Cloudflare account needed
+cd ../ai-bot-collector-src && npm test   # Vitest unit tests — no Cloudflare account needed
 ```
+
+This directory has no tests of its own — it is configuration. CI installs it from
+the registry and runs `wrangler deploy --dry-run` against it, which is the check
+that matters here: that a customer can clone it and deploy.
 
 ### Toolchain
 

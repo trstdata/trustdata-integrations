@@ -1,0 +1,11 @@
+// Emit config for the published package: JS + declarations from src/ only.
+// The base tsconfig.json stays noEmit and includes test/ for typechecking.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"]
+}
