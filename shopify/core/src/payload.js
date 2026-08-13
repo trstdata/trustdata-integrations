@@ -9,13 +9,13 @@
  * @returns {Object}
  */
 export function cleanPayload(obj) {
-    const cleaned = {};
-    for (const [key, value] of Object.entries(obj)) {
-        if (value != null) {
-            cleaned[key] = value;
-        }
+  const cleaned = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value != null) {
+      cleaned[key] = value;
     }
-    return cleaned;
+  }
+  return cleaned;
 }
 
 /**
@@ -23,11 +23,11 @@ export function cleanPayload(obj) {
  * @returns {string}
  */
 export function generateId() {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-        const r = (Math.random() * 16) | 0;
-        const v = c === 'x' ? r : (r & 0x3) | 0x8;
-        return v.toString(16);
-    });
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 /**
@@ -36,21 +36,27 @@ export function generateId() {
  * @returns {{adblock_detected: boolean|null, adblock_platforms: string|null}}
  */
 export function formatAdBlockData(result) {
-    if (!result) {
-        return {
-            adblock_detected: null,
-            adblock_platforms: null,
-        };
-    }
-
-    const blockedPlatforms = Object.entries(result.platforms)
-        .filter(([_, blocked]) => blocked)
-        .map(([platform]) => platform);
-
+  // `platforms` is missing on entries written by an older pixel, and the
+  // callers rehydrate this straight from localStorage with no schema check.
+  // Guarding only `!result` threw on Object.entries(undefined) and killed the
+  // whole event send.
+  if (!result?.platforms) {
     return {
-        adblock_detected: result.detected,
-        adblock_platforms: blockedPlatforms.length ? blockedPlatforms.join(',') : null,
+      adblock_detected: null,
+      adblock_platforms: null,
     };
+  }
+
+  const blockedPlatforms = Object.entries(result.platforms)
+    .filter(([_, blocked]) => blocked)
+    .map(([platform]) => platform);
+
+  return {
+    adblock_detected: result.detected,
+    adblock_platforms: blockedPlatforms.length
+      ? blockedPlatforms.join(",")
+      : null,
+  };
 }
 
 /**
@@ -58,7 +64,7 @@ export function formatAdBlockData(result) {
  * @returns {number}
  */
 export function getTimestamp() {
-    return Math.floor(Date.now() / 1000);
+  return Math.floor(Date.now() / 1000);
 }
 
 /**
@@ -68,6 +74,6 @@ export function getTimestamp() {
  * @returns {string}
  */
 export function truncate(str, maxLength) {
-    if (!str || str.length <= maxLength) return str;
-    return str.substring(0, maxLength - 3) + '...';
+  if (!str || str.length <= maxLength) return str;
+  return str.substring(0, maxLength - 3) + "...";
 }

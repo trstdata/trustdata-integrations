@@ -15,6 +15,7 @@ export const STORAGE_KEYS: {
 };
 export const UTM_PARAMS: string[];
 export const PERSONAL_DATA_PARAMS: string[];
+export const PII_PARAMS: string[];
 export const ADBLOCK_ENDPOINTS: Record<string, string>;
 export const SHOPIFY_EVENT_MAP: Record<string, string>;
 
@@ -22,6 +23,8 @@ export const SHOPIFY_EVENT_MAP: Record<string, string>;
 export function maskUrl(url: string, params?: string[]): string;
 export function hasMarketingParams(url: string): boolean;
 export function isExternalReferrer(referrer: string, currentHost: string, ignoreList?: string[]): boolean;
+export function sanitizePageUrl(url: string, consented: boolean): string;
+export function sanitizeReferrer(referrer: string, consented: boolean): string | null;
 
 // Payload utilities
 export function cleanPayload<T extends Record<string, unknown>>(obj: T): Partial<T>;
@@ -32,6 +35,7 @@ export function truncate(str: string, maxLength: number): string;
 
 // User data utilities
 export function buildUserData(data: unknown): UserData | undefined;
+export function hashSHA256(value: string): Promise<string>;
 
 // Consent state (4 flags like Shopify/sGTM)
 export interface ConsentState {

@@ -33,7 +33,8 @@ mirror that drops or renames one fails the build.
 
 The pixel's typecheck does not catch it. `tsc` resolves this package through the
 `types` entry and reads only `src/types.d.ts`, never the JavaScript beside it, so
-a copy whose runtime exports were all deleted would still typecheck clean. That
-declaration file is maintained by hand and is already incomplete: `PII_PARAMS`,
-`sanitizePageUrl` and `sanitizeReferrer` are exported by `src/index.js` and not
-declared in it. Add them there if the pixel ever needs them.
+a copy whose runtime exports were all deleted would still typecheck clean.
+
+That declaration file is maintained by hand, which means it can disagree with the
+implementation in either direction. When you add an export to `src/index.js`, add
+it there in the same change.
