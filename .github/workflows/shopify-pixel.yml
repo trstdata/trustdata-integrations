@@ -43,3 +43,9 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      # The typecheck above cannot see the vendored JavaScript: tsc resolves the
+      # package through its hand-written types entry and never opens a .js file.
+      # This imports the real module instead.
+      - name: Verify the vendored core still exports what the pixel uses
+        run: npm run verify:core

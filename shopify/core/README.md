@@ -21,8 +21,19 @@ This directory is a copy of `tracking/client/core` in the internal
 `package.json` are mirrored here — the GTM and sGTM templates that live
 alongside it upstream are not part of this package.
 
-**Change the upstream copy first, then mirror it here** and bump `version` in
-both `package.json` files together, so the version recorded in
-`../pixel/package-lock.json` keeps matching what this directory actually
-contains. CI typechecks the pixel against this source, so a partial sync that
-drops a symbol the pixel imports fails the build.
+**Change the upstream copy first, then mirror it here.** Bump `version` in both
+`package.json` files together, so the version recorded in
+`../pixel/package-lock.json` keeps matching what this directory contains. Mirror
+`VERSION` in `src/constants.js` deliberately as well: it is a separate number
+that ships as `lib_version` on every event, and nothing reconciles the two.
+
+CI catches a partial sync through `npm run verify:core` in the pixel, which
+imports this package and checks every symbol the pixel imports or re-exports. A
+mirror that drops or renames one fails the build.
+
+The pixel's typecheck does not catch it. `tsc` resolves this package through the
+`types` entry and reads only `src/types.d.ts`, never the JavaScript beside it, so
+a copy whose runtime exports were all deleted would still typecheck clean. That
+declaration file is maintained by hand and is already incomplete: `PII_PARAMS`,
+`sanitizePageUrl` and `sanitizeReferrer` are exported by `src/index.js` and not
+declared in it. Add them there if the pixel ever needs them.

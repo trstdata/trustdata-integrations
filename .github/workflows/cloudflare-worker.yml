@@ -42,7 +42,18 @@ jobs:
       # npm 11 can fail `npm ci` on Cloudflare. Match their npm exactly, read
       # from package.json's packageManager field so there is one source of truth.
       - name: Install the npm version used by Workers Builds
-        run: npm install -g "$(node -p "require('./package.json').packageManager")"
+        run: |
+          PINNED="$(node -p "require('./package.json').packageManager")"
+          case "$PINNED" in
+            npm@*) ;;
+            *) echo "packageManager must pin npm, got '$PINNED'"; exit 1 ;;
+          esac
+          npm install -g "$PINNED"
+          # Assert it took effect. Without this the job silently falls back to the
+          # runner's bundled npm and goes green on the lockfile shape this exists
+          # to prevent.
+          test "$(npm --version)" = "${PINNED#npm@}" \
+            || { echo "npm is $(npm --version), expected ${PINNED#npm@}"; exit 1; }
 
       # `npm ci` fails if package.json and package-lock.json are out of sync —
       # this step is the guard against shipping a lockfile customers can't install.
@@ -55,7 +66,12 @@ jobs:
       - name: Test
         run: npm test
 
-      # Builds the Worker exactly as `wrangler deploy` would, without uploading
-      # it, so no Cloudflare credentials are needed.
-      - name: Build Worker (dry run)
-        run: npx wrangler deploy --dry-run
+      # Builds the Worker exactly as `wrangler deploy` would, without uploading it,
+      # so no Cloudflare credentials are needed, then checks the result against the
+      # committed bundle. worker.bundle.js is a customer install path in its own
+      # right (README: paste it into the dashboard), so a source change that never
+      # reaches it ships stale code to everyone who installed that way.
+      - name: Build Worker and check the committed bundle is current
+        run: |
+          npm run bundle
+          git diff --exit-code worker.bundle.js
