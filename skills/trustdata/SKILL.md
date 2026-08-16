@@ -115,6 +115,26 @@ State the correlation and name the limit:
 Never write that AI visibility drove, delivered, or generated revenue. The same
 rule covers GEO probes, citation gaps, and share of voice.
 
+## Paid advice: Google Ads Smart Bidding
+
+Smart Bidding bids per auction and learns from query-level conversion data
+across the whole account (Google Ads Help, "Setting smarter Search bids"). A
+campaign with few conversions borrows signal from similar queries elsewhere in
+the account. There is no per-campaign learning minimum. Google's "30 conversions
+in 30 days" is the bar for evaluating a target, not for the algorithm to work,
+and its Target ROAS figure (15 in 30 days) is counted at the conversion-tracking
+level, not per campaign.
+
+Do not recommend merging or consolidating Google Ads campaigns because a
+campaign is "below N conversions" or so the algorithm "learns better". That
+advice resets targets and history and buys nothing. Merging is worth raising
+only when the data shows budget-limited impression share, campaigns sharing one
+target and audience, or duplicated targeting bidding against itself. Say which.
+
+Meta's learning phase (about 50 optimization events per ad set per week) is
+documented by Meta and is per ad set. Do not carry that number, or any
+conversion count, over to Google Ads.
+
 ## Scopes
 
 Every tool needs a scope on the API token. A missing scope returns an error
