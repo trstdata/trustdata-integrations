@@ -57,6 +57,12 @@ property id, and an organization usually has several.
 - Request an extra data check: `ask_investigation_followup`
 - Report whether a diagnosis was right: `submit_verdict`
 
+**The plan**
+- The active strategy, its target, and how the period is pacing: `get_strategy`
+- Read it before acting on a recommendation: it says which channels the customer
+  chose to prioritise, and pacing says whether they are ahead or behind. There is
+  no tool that writes a strategy.
+
 **Recommendations and experiments**
 - Open recommendations: `list_recommendations`
 - Create one: `create_recommendation`
