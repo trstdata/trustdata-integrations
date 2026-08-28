@@ -28,7 +28,11 @@ property id, and an organization usually has several.
 ## Which tool answers which question
 
 **Start here**
-`list_properties` · `get_query_instructions` · `list_analytics_queries`
+`list_properties` · `list_actions` · `get_query_instructions` · `list_analytics_queries`
+
+`list_actions` is the catalog: every tool with its effect (read, write,
+destructive), the scope it needs, and whether this token holds it. Read it
+before a write, so you know which calls will be refused.
 
 **Traffic, conversions, and spend**
 - One dimension broken out over a date range: `query_metrics`
