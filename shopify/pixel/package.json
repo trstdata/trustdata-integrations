@@ -12,8 +12,8 @@
     "@trustdata/tracking-core": "file:../core"
   },
   "devDependencies": {
-    "@shopify/cli": "^3.75.0",
-    "@shopify/web-pixels-extension": "^1.0.0",
-    "typescript": "^5.9.3"
+    "@shopify/cli": "^4.7.0",
+    "@shopify/web-pixels-extension": "^2.18.0",
+    "typescript": "^7.0.2"
   }
 }
