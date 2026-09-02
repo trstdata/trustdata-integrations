@@ -28,13 +28,27 @@ property id, and an organization usually has several.
 ## Which tool answers which question
 
 **Start here**
-`list_properties` · `list_actions` · `get_query_instructions` · `list_analytics_queries`
+`list_properties` · `list_datasets` · `list_actions` · `get_query_instructions`
+
+`list_datasets` is what you read before composing a report: one entry per
+dataset, naming the dimensions you may group by, the metrics that grain
+carries, the keys you may filter on, and a runnable example call. It lists
+only what this token can reach, so nothing in it is refused.
 
 `list_actions` is the catalog: every tool with its effect (read, write,
 destructive), the scope it needs, and whether this token holds it. Read it
 before a write, so you know which calls will be refused.
 
+`list_analytics_queries` is the older shape of `list_datasets`, keyed on the
+raw query_type. Prefer `list_datasets`.
+
+**What happened lately**
+- Anomalies, alerts and logged changes in one feed: `list_signals`
+  (kinds you have no scope for are named in `meta.omitted_kinds`)
+
 **Traffic, conversions, and spend**
+- Any dataset, grouped by up to five dimensions, filtered: `run_report`
+- Funnel steps and per-step drop-off: `run_funnel`
 - One dimension broken out over a date range: `query_metrics`
 - One metric as a time series: `get_timeline`
 - Multi-touch journeys and Sankey data: `get_attribution`
