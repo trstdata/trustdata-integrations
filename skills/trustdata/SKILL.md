@@ -67,8 +67,7 @@ raw query_type. Prefer `list_datasets`.
 
 **Alerts and anomalies**
 - Open, acknowledged, or resolved alerts: `list_alerts`
-- Acknowledge one: `acknowledge_alert`
-- Resolve one: `resolve_alert`
+- Acknowledge or resolve one: `update_alert` with `status`
 - Anomaly investigations and their verdicts: `list_anomalies`
 - One investigation in full: `get_investigation`
 - Ask about the evidence already gathered: `ask_investigation`
@@ -86,7 +85,7 @@ raw query_type. Prefer `list_datasets`.
 - Create one: `create_recommendation`
 - Dismiss one: `dismiss_recommendation`
 - Mark one followed: `mark_recommendation_done`
-- Concluded experiments and their verdicts: `list_concluded_experiments`
+- Concluded experiments and their verdicts: `list_recommendations` with `status="concluded"`
 
 **Account inventory**
 - Connected ad platforms: `list_data_sources`
