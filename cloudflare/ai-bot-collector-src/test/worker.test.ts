@@ -17,6 +17,7 @@ import {
   serveWebmcpManifest,
   buildManifestUrl,
   DEFAULT_SAMPLE_RATE,
+  DEFAULT_BOTLIST_URL,
   BOTLIST_CACHE_KEY,
   BOTLIST_KV_TTL_SECONDS,
   EMBEDDED_BOT_LISTS,
@@ -44,6 +45,10 @@ describe("forwardLog", () => {
     TRUSTDATA_INGEST_URL: "https://ingest.test/v1/logs/cloudflare_worker",
     TRUSTDATA_API_KEY: "secret",
     TRUSTDATA_ATTRIBUTION_ID: "prop-1",
+    // Opt out of botlist sync so this suite's fetchSpy only ever sees the
+    // ingest POST it asserts on — forwardLog() calls getBotLists() first,
+    // and since 0.5.1 an unset TRUSTDATA_BOTLIST_URL defaults to syncing.
+    TRUSTDATA_BOTLIST_URL: "",
   };
 
   let fetchSpy: ReturnType<typeof vi.fn>;
@@ -440,10 +445,21 @@ describe("getBotLists (runtime sync)", () => {
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
   });
 
-  it("returns the embedded lists when no botlist URL is configured", async () => {
+  it("returns the embedded lists when explicitly opted out with an empty string", async () => {
     const lists = await getBotLists({ ...syncEnv, TRUSTDATA_BOTLIST_URL: "" });
     expect(lists).toBe(EMBEDDED_BOT_LISTS);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("syncs against DEFAULT_BOTLIST_URL when the variable is absent entirely", async () => {
+    // Deployments from before TRUSTDATA_BOTLIST_URL existed in wrangler.jsonc
+    // never had it added retroactively (upgrading never edits wrangler.jsonc)
+    // — undefined must still sync, or those Workers never pick up new bots.
+    const { TRUSTDATA_BOTLIST_URL, ...envWithoutBotlistUrl } = syncEnv;
+    const lists = await getBotLists(envWithoutBotlistUrl);
+
+    expect(fetchSpy).toHaveBeenCalledWith(DEFAULT_BOTLIST_URL, expect.anything());
+    expect(lists.patterns.some((p) => p.pattern === "newbot9000")).toBe(true);
   });
 
   it("fetches the canonical list, uses it, and stores it in KV", async () => {
@@ -854,6 +870,9 @@ describe("forwardLog bot verification (integration)", () => {
     TRUSTDATA_INGEST_URL: "https://ingest.test/v1/logs/cloudflare_worker",
     TRUSTDATA_API_KEY: "secret",
     TRUSTDATA_ATTRIBUTION_ID: "prop-1",
+    // Same reasoning as the forwardLog describe above — keep this suite's
+    // fetch mock isolated from botlist sync.
+    TRUSTDATA_BOTLIST_URL: "",
   };
 
   afterEach(() => {

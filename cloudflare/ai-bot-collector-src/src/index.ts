@@ -31,7 +31,7 @@
 // Stamped on every forwarded event as `worker_version` so TrustData can tell
 // which build a zone runs (and who is stale when a fix ships). Must match
 // package.json "version" — a test enforces the sync. Bump on every release.
-export const WORKER_VERSION = "0.5.0";
+export const WORKER_VERSION = "0.5.1";
 
 export interface Env {
   TRUSTDATA_INGEST_URL: string;
@@ -49,9 +49,13 @@ export interface Env {
   // samples. Unset → DEFAULT_SAMPLE_RATE. "0" disables sampling.
   TRUSTDATA_SAMPLE_RATE?: string;
   // Endpoint serving the canonical AI bot list (the TrustData API's
-  // /v1/config/ai-bots). When set, the Worker syncs its edge lists from it
-  // (in-memory + KV cache) so new bots are matched in full fidelity without a
-  // re-deploy. Unset or unreachable → the embedded lists below.
+  // /v1/config/ai-bots). The Worker syncs its edge lists from it (in-memory +
+  // KV cache) so new bots are matched in full fidelity without a re-deploy.
+  // Undefined (not in wrangler.jsonc at all — every Worker deployed before
+  // this variable existed) → DEFAULT_BOTLIST_URL, so sync turns on for
+  // existing deployments the moment they pick up this code change, with no
+  // wrangler.jsonc edit required. Explicitly set to "" → opt out and pin the
+  // embedded snapshot. Unreachable → the embedded lists below, either way.
   TRUSTDATA_BOTLIST_URL?: string;
   // "true" → forward every request unfiltered (legacy behavior). Requires a
   // DPA with TrustData since full traffic includes visitor personal data.
@@ -187,6 +191,13 @@ export const AI_REFERRER_DOMAINS = new Set([
 
 export const DEFAULT_SAMPLE_RATE = 0.02;
 
+// Canonical sync endpoint, used whenever TRUSTDATA_BOTLIST_URL is absent from
+// wrangler.jsonc entirely — see the Env.TRUSTDATA_BOTLIST_URL comment. Must
+// match the pre-filled default in wrangler.jsonc's vars block (a test asserts
+// they stay identical); this constant is what makes deployments that predate
+// that block start syncing anyway.
+export const DEFAULT_BOTLIST_URL = "https://t.trustdata.tech/v1/config/ai-bots";
+
 export type EdgeMatch = "bot" | "referral" | null;
 
 export interface BotLists {
@@ -224,9 +235,15 @@ export function _resetBotListCache(): void {
 }
 
 export async function getBotLists(env: Env): Promise<BotLists> {
-  if (!env.TRUSTDATA_BOTLIST_URL) {
+  // Explicit "" opts out (documented as "leave blank to pin the embedded
+  // list"); undefined means the variable was never in this deployment's
+  // wrangler.jsonc at all, which defaults to syncing rather than opting out —
+  // a Worker deployed before TRUSTDATA_BOTLIST_URL existed would otherwise
+  // never sync again, even after every later code update.
+  if (env.TRUSTDATA_BOTLIST_URL === "") {
     return EMBEDDED_BOT_LISTS;
   }
+  const botlistUrl = env.TRUSTDATA_BOTLIST_URL ?? DEFAULT_BOTLIST_URL;
   if (botListCache && Date.now() - botListCache.fetchedAt < BOTLIST_MEMORY_TTL_MS) {
     return botListCache.lists;
   }
@@ -241,7 +258,7 @@ export async function getBotLists(env: Env): Promise<BotLists> {
       }
     }
 
-    const resp = await fetch(env.TRUSTDATA_BOTLIST_URL, {
+    const resp = await fetch(botlistUrl, {
       headers: { Accept: "application/json" },
     });
     if (!resp.ok) {

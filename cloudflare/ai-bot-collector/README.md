@@ -154,7 +154,7 @@ Logpush hits the Go server's `/v1/logs/cloudflare_logpush` endpoint (NDJSON). Sa
 | `TRUSTDATA_API_KEY` | **secret** | Auth key issued on `/organizations/<org_id>/#integrations` → Cloudflare. Declared in `.dev.vars.example`, so the Deploy button stores it as an encrypted secret, not a plaintext var. |
 | `TRUSTDATA_MANIFEST_URL` | var *(optional)* | Base URL for the WebMCP manifest API. Pre-filled to `https://app.trustdata.tech/api/v1/webmcp` — leave blank to disable manifest hosting |
 | `TRUSTDATA_SAMPLE_RATE` | var *(optional)* | Fraction of non-AI traffic forwarded as anonymized samples. Pre-filled to `0.02`; `0` disables sampling |
-| `TRUSTDATA_BOTLIST_URL` | var *(optional)* | Canonical AI bot list endpoint for runtime sync. Pre-filled to `https://t.trustdata.tech/v1/config/ai-bots`; leave blank to pin the embedded list |
+| `TRUSTDATA_BOTLIST_URL` | var *(optional)* | Canonical AI bot list endpoint for runtime sync. Defaults to `https://t.trustdata.tech/v1/config/ai-bots` even if unset (not just when pre-filled) — set to `""` to pin the embedded list instead |
 | `TRUSTDATA_FORWARD_ALL` | var *(optional)* | `true` → forward all traffic unfiltered (legacy behavior, requires DPA). Unset by default |
 | `WEBMCP_CACHE` | KV binding *(optional)* | Edge cache for the signed manifest (1-hour TTL). Auto-provisioned by the Deploy button. |
 
@@ -216,13 +216,16 @@ authenticates the `X-API-Key` header, then classifies each log line into one of:
 The Worker's edge list only decides *what gets forwarded*; the bot name and
 intent are always assigned server-side with the most current list.
 
-**Bot list sync:** when `TRUSTDATA_BOTLIST_URL` is set (pre-filled to
-`https://t.trustdata.tech/v1/config/ai-bots`), the Worker syncs its edge
-lists from TrustData's canonical list — in-memory cache per isolate (10 min),
-KV cache (6 h), embedded snapshot as fallback. New AI bots are matched in
-full fidelity within ~6 hours of TrustData adding them, **without
-re-deploying your Worker**. Matching is case-insensitive (some vendors ship
-lowercase UAs). Unset the variable to pin the embedded list.
+**Bot list sync:** the Worker syncs its edge lists from TrustData's canonical
+list at `https://t.trustdata.tech/v1/config/ai-bots` — in-memory cache per
+isolate (10 min), KV cache (6 h), embedded snapshot as fallback. This is the
+default even when `TRUSTDATA_BOTLIST_URL` isn't in your `wrangler.jsonc` at
+all, which covers every Worker deployed before this variable existed — no
+config edit needed, it starts syncing the moment you pick up a Worker code
+update. New AI bots are matched in full fidelity within ~6 hours of
+TrustData adding them, **without re-deploying your Worker**. Matching is
+case-insensitive (some vendors ship lowercase UAs). Set
+`TRUSTDATA_BOTLIST_URL = ""` to opt out and pin the embedded snapshot.
 
 Events feed ClickHouse materialized views (`cloudflare_bot_activity`,
 `cloudflare_referral_activity`), which dbt unions with the SDK-observed

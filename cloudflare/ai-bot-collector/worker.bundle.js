@@ -1,4 +1,4 @@
-// @trustdata/ai-bot-collector v0.5.0
+// @trustdata/ai-bot-collector v0.5.1
 /**
  * TrustData AI Bot Collector — Cloudflare Worker.
  *
@@ -31,7 +31,7 @@
 // Stamped on every forwarded event as `worker_version` so TrustData can tell
 // which build a zone runs (and who is stale when a fix ships). Must match
 // package.json "version" — a test enforces the sync. Bump on every release.
-export const WORKER_VERSION = "0.5.0";
+export const WORKER_VERSION = "0.5.1";
 // Vendors that publish an IP-range list (see BOT_IP_RANGE_URLS) — only their
 // bots can be IP-verified at the edge. Mirrors botverify.DefaultSources keys on
 // the server. Offline fallback; the live set arrives as `verifiable_engines` in
@@ -112,6 +112,12 @@ export const AI_REFERRER_DOMAINS = new Set([
     "chat.deepseek.com",
 ]);
 export const DEFAULT_SAMPLE_RATE = 0.02;
+// Canonical sync endpoint, used whenever TRUSTDATA_BOTLIST_URL is absent from
+// wrangler.jsonc entirely — see the Env.TRUSTDATA_BOTLIST_URL comment. Must
+// match the pre-filled default in wrangler.jsonc's vars block (a test asserts
+// they stay identical); this constant is what makes deployments that predate
+// that block start syncing anyway.
+export const DEFAULT_BOTLIST_URL = "https://t.trustdata.tech/v1/config/ai-bots";
 export const EMBEDDED_BOT_LISTS = {
     patterns: EMBEDDED_BOT_PATTERNS,
     referrerDomains: AI_REFERRER_DOMAINS,
@@ -136,9 +142,15 @@ export function _resetBotListCache() {
     botListCache = null;
 }
 export async function getBotLists(env) {
-    if (!env.TRUSTDATA_BOTLIST_URL) {
+    // Explicit "" opts out (documented as "leave blank to pin the embedded
+    // list"); undefined means the variable was never in this deployment's
+    // wrangler.jsonc at all, which defaults to syncing rather than opting out —
+    // a Worker deployed before TRUSTDATA_BOTLIST_URL existed would otherwise
+    // never sync again, even after every later code update.
+    if (env.TRUSTDATA_BOTLIST_URL === "") {
         return EMBEDDED_BOT_LISTS;
     }
+    const botlistUrl = env.TRUSTDATA_BOTLIST_URL ?? DEFAULT_BOTLIST_URL;
     if (botListCache && Date.now() - botListCache.fetchedAt < BOTLIST_MEMORY_TTL_MS) {
         return botListCache.lists;
     }
@@ -151,7 +163,7 @@ export async function getBotLists(env) {
                 return lists;
             }
         }
-        const resp = await fetch(env.TRUSTDATA_BOTLIST_URL, {
+        const resp = await fetch(botlistUrl, {
             headers: { Accept: "application/json" },
         });
         if (!resp.ok) {
