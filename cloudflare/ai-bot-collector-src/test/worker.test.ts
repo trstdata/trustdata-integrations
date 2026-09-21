@@ -45,6 +45,10 @@ describe("forwardLog", () => {
     TRUSTDATA_INGEST_URL: "https://ingest.test/v1/logs/cloudflare_worker",
     TRUSTDATA_API_KEY: "secret",
     TRUSTDATA_ATTRIBUTION_ID: "prop-1",
+    // Opt out of botlist sync so this suite's fetchSpy only ever sees the
+    // ingest POST it asserts on — forwardLog() calls getBotLists() first,
+    // and since 0.5.1 an unset TRUSTDATA_BOTLIST_URL defaults to syncing.
+    TRUSTDATA_BOTLIST_URL: "",
   };
 
   let fetchSpy: ReturnType<typeof vi.fn>;
@@ -866,6 +870,9 @@ describe("forwardLog bot verification (integration)", () => {
     TRUSTDATA_INGEST_URL: "https://ingest.test/v1/logs/cloudflare_worker",
     TRUSTDATA_API_KEY: "secret",
     TRUSTDATA_ATTRIBUTION_ID: "prop-1",
+    // Same reasoning as the forwardLog describe above — keep this suite's
+    // fetch mock isolated from botlist sync.
+    TRUSTDATA_BOTLIST_URL: "",
   };
 
   afterEach(() => {
