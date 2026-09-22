@@ -32,6 +32,9 @@ jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.guard.outputs.publish }}
+      version: ${{ steps.guard.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
@@ -56,6 +59,7 @@ jobs:
         id: guard
         run: |
           VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if npm view "@trustdata/ai-bot-collector@$VERSION" version >/dev/null 2>&1; then
             echo "v$VERSION is already on the registry — nothing to publish."
             echo "publish=false" >> "$GITHUB_OUTPUT"
@@ -75,3 +79,58 @@ jobs:
       - name: Publish
         if: steps.guard.outputs.publish == 'true'
         run: npm publish
+
+  # Dependabot has no on-demand trigger (github.com/dependabot/dependabot-core#6098),
+  # so the shell's pin would otherwise sit stale for up to a week. This bumps it the
+  # moment a release lands, opening the same kind of PR Dependabot would — someone
+  # still reviews and merges it, they just don't have to remember to run it by hand.
+  #
+  # The org disables "Allow GitHub Actions to create and approve pull requests",
+  # so GITHUB_TOKEN can't open the PR no matter what's granted below — the job
+  # needs SHELL_PR_PAT (repo secret, fine-grained PAT scoped to this repo only,
+  # Contents + Pull requests: read and write) instead.
+  bump-shell-pin:
+    name: Open a PR bumping the shell's pinned version
+    needs: publish
+    if: needs.publish.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare/ai-bot-collector
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: cloudflare/ai-bot-collector/.node-version
+
+      - name: Install the npm version used by Workers Builds
+        run: |
+          PINNED="$(node -p "require('./package.json').packageManager")"
+          npm install -g "$PINNED"
+
+      # The registry's search index can lag the publish by a few seconds.
+      - name: Wait for the new version to be resolvable
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          for i in $(seq 1 10); do
+            npm view "@trustdata/ai-bot-collector@$VERSION" version >/dev/null 2>&1 && exit 0
+            sleep 5
+          done
+          echo "v$VERSION never became resolvable"; exit 1
+
+      - name: Bump the exact pin
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: npm install "@trustdata/ai-bot-collector@$VERSION" --save-exact
+
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.SHELL_PR_PAT }}
+          commit-message: "chore: bump @trustdata/ai-bot-collector to ${{ needs.publish.outputs.version }}"
+          title: "chore: bump @trustdata/ai-bot-collector to ${{ needs.publish.outputs.version }}"
+          branch: bump-shell-pin-${{ needs.publish.outputs.version }}
+          add-paths: |
+            cloudflare/ai-bot-collector/package.json
+            cloudflare/ai-bot-collector/package-lock.json
