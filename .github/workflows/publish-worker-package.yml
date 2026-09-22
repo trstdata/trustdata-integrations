@@ -84,14 +84,16 @@ jobs:
   # so the shell's pin would otherwise sit stale for up to a week. This bumps it the
   # moment a release lands, opening the same kind of PR Dependabot would — someone
   # still reviews and merges it, they just don't have to remember to run it by hand.
+  #
+  # The org disables "Allow GitHub Actions to create and approve pull requests",
+  # so GITHUB_TOKEN can't open the PR no matter what's granted below — the job
+  # needs SHELL_PR_PAT (repo secret, fine-grained PAT scoped to this repo only,
+  # Contents + Pull requests: read and write) instead.
   bump-shell-pin:
     name: Open a PR bumping the shell's pinned version
     needs: publish
     if: needs.publish.outputs.publish == 'true'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     defaults:
       run:
         working-directory: cloudflare/ai-bot-collector
@@ -125,6 +127,7 @@ jobs:
 
       - uses: peter-evans/create-pull-request@v7
         with:
+          token: ${{ secrets.SHELL_PR_PAT }}
           commit-message: "chore: bump @trustdata/ai-bot-collector to ${{ needs.publish.outputs.version }}"
           title: "chore: bump @trustdata/ai-bot-collector to ${{ needs.publish.outputs.version }}"
           branch: bump-shell-pin-${{ needs.publish.outputs.version }}
