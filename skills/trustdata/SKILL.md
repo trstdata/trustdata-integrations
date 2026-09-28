@@ -91,6 +91,13 @@ raw query_type. Prefer `list_datasets`.
 - Connected ad platforms: `list_data_sources`
 - Tracking stream ids: `list_attribution_ids`
 
+**The customer's own ad and search accounts, live**
+- A question no dataset answers, asked of Google Ads or Search Console:
+  `call_data_source`. Copy the path from the source's `guide` in
+  `list_data_sources`. Read-only, and 60 calls an hour per platform.
+- The figures are the platform's own. Report them as platform-reported. Never
+  add them to TrustData's numbers or present the two as the same count.
+
 **Change ledger**
 - Known annotations: `list_change_events`
 - Record a change you made: `create_change_event`
