@@ -91,10 +91,15 @@ raw query_type. Prefer `list_datasets`.
 - Connected ad platforms: `list_data_sources`
 - Tracking stream ids: `list_attribution_ids`
 
-**The customer's own ad and search accounts, live**
-- A question no dataset answers, asked of Google Ads or Search Console:
-  `call_data_source`. Copy the path from the source's `guide` in
-  `list_data_sources`. Read-only, and 60 calls an hour per platform.
+**The customer's own ad, search and analytics accounts, live**
+- A question no dataset answers, asked of Google Ads, Search Console, GA4 or
+  Meta Ads: `call_data_source`. Copy the path from the source's `guide` in
+  `list_data_sources`. The guide also holds notes for that platform and a
+  `credential` status: "needs_reconnect" means a workspace admin must reconnect
+  the source. Read-only, and 60 calls an hour per platform. An object read on
+  Meta and each report of a GA4 batch take one call each.
+- Meta calls are GETs. Put fields, breakdowns, date_preset and the other
+  query keys in `params`, not in the path.
 - The figures are the platform's own. Report them as platform-reported. Never
   add them to TrustData's numbers or present the two as the same count.
 
