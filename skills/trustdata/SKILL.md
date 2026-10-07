@@ -28,12 +28,16 @@ property id, and an organization usually has several.
 ## Which tool answers which question
 
 **Start here**
-`list_properties` · `list_datasets` · `list_actions` · `get_query_instructions`
+`list_properties` · `list_datasets` · `list_fields` · `list_actions` · `get_query_instructions`
 
 `list_datasets` is what you read before composing a report: one entry per
 dataset, naming the dimensions you may group by, the metrics that grain
 carries, the keys you may filter on, and a runnable example call. It lists
 only what this token can reach, so nothing in it is refused.
+
+`list_fields` is the same catalog by field, and the one to read when you know the
+metric you want and not the dataset. Pass the fields you have chosen and it says
+which other fields fit beside them, and why not if none does.
 
 `list_actions` is the catalog: every tool with its effect (read, write,
 destructive), the scope it needs, and whether this token holds it. Read it
