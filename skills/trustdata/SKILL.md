@@ -111,6 +111,10 @@ raw query_type. Prefer `list_datasets`.
 - Known annotations: `list_change_events`
 - Record a change you made: `create_change_event`
 
+**Custom fields**
+- See them: `list_custom_fields`. Register a param: `add_custom_field`. Remove one: `remove_custom_field`.
+  Pass dry_run true first. A new field reads empty until the next data refresh: do not retry.
+
 **Keeping an analysis**
 - Keep tables, charts and text in a dossier: `add_to_dossier`. Everything you add
   is a proposal a member accepts or declines. Put the charts behind your numbers
