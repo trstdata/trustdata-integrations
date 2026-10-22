@@ -92,7 +92,7 @@ raw query_type. Prefer `list_datasets`.
 - Concluded experiments and their verdicts: `list_recommendations` with `status="concluded"`
 
 **Account inventory**
-- Connected ad platforms: `list_data_sources`. A BigQuery warehouse's tables and approved columns: `describe_warehouse`
+- Connected ad platforms: `list_data_sources`. A BigQuery warehouse's tables and approved columns: `describe_warehouse`; a guarded SELECT over them: `query_warehouse`
 - Tracking stream ids: `list_attribution_ids`
 
 **The customer's own ad, search and analytics accounts, live**
