@@ -28,23 +28,21 @@ property id, and an organization usually has several.
 ## Which tool answers which question
 
 **Start here**
-`list_properties` · `list_datasets` · `list_fields` · `list_actions` · `get_query_instructions`
+`list_properties` · `list_fields` · `list_actions` · `get_query_instructions`
 
-`list_datasets` is what you read before composing a report: one entry per
-dataset, naming the dimensions you may group by, the metrics that grain
-carries, the keys you may filter on, and a runnable example call. It lists
-only what this token can reach, so nothing in it is refused.
-
-`list_fields` is the same catalog by field, and the one to read when you know the
-metric you want and not the dataset. Pass the fields you have chosen and it says
-which other fields fit beside them, and why not if none does.
+`list_fields` is what you read before composing a report: every metric and
+dimension this token can read, named `<entity>__<name>` for dimensions
+(`session__geo_country`, `campaign__id`), with the time dimensions
+(`metric_time__day|week|month`). Pass the fields you have chosen and it says
+which other fields fit beside them, why not if none does, and gives a request
+that runs. `run_report` takes no `dataset`: the fields choose the data.
 
 `list_actions` is the catalog: every tool with its effect (read, write,
 destructive), the scope it needs, and whether this token holds it. Read it
 before a write, so you know which calls will be refused.
 
-`list_analytics_queries` is the older shape of `list_datasets`, keyed on the
-raw query_type. Prefer `list_datasets`.
+`list_analytics_queries` is the older catalog, keyed on the raw query_type, for
+the `spec` door. Prefer `list_fields`.
 
 **What happened lately**
 - Anomalies, alerts and logged changes in one feed: `list_signals`
