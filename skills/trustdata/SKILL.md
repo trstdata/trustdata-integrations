@@ -92,6 +92,8 @@ the `spec` door. Prefer `list_fields`.
 **Account inventory**
 - Connected ad platforms: `list_data_sources`. A BigQuery warehouse's tables and approved columns: `describe_warehouse`; a guarded SELECT over them: `query_warehouse`
 - Tracking stream ids: `list_attribution_ids`
+- What the business has told TrustData about itself (offering, market, audience, and the
+  like), for a property or one of its streams: `get_context`
 
 **The customer's own ad, search and analytics accounts, live**
 - A question no dataset answers, asked of Google Ads, Search Console, GA4 or
