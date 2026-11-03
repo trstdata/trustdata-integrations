@@ -45,11 +45,11 @@ before a write, so you know which calls will be refused.
 the `spec` door. Prefer `list_fields`.
 
 **What happened lately**
-- Anomalies, alerts and logged changes in one feed: `list_signals`
-  (kinds you have no scope for are named in `meta.omitted_kinds`)
+- Anomalies, alerts and logged changes in one feed: `list_signals` (`meta.omitted_kinds` names kinds you lack scope for)
 
 **Traffic, conversions, and spend**
 - Any dataset, grouped by up to five dimensions, filtered: `run_report`
+- A chart in the chat, only when the person asks to see one: `chart_report`
 - Funnel steps and per-step drop-off: `run_funnel`
 - One dimension broken out over a date range: `query_metrics`
 - One metric as a time series: `get_timeline`
@@ -83,7 +83,7 @@ the `spec` door. Prefer `list_fields`.
   no tool that writes a strategy.
 
 **Recommendations and experiments**
-- Open recommendations: `list_recommendations`
+- Open recommendations: `list_recommendations`; as cards to act on: `show_recommendations`
 - Create one: `create_recommendation`
 - Dismiss one: `dismiss_recommendation`
 - Mark one followed: `mark_recommendation_done`
