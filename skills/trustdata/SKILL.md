@@ -66,6 +66,8 @@ the `spec` door. Prefer `list_fields`.
 
 **SEO**
 - Rankings joined with volume and difficulty: `list_seo_keywords`
+- The search terms followed, in readings a day: `list_search_terms`. Follow, change or
+  stop one: `watch_search_term`, `update_watch`, `unwatch_search_term`. Pass dry_run true first.
 
 **Alerts and anomalies**
 - Open, acknowledged, or resolved alerts: `list_alerts`
@@ -85,8 +87,7 @@ the `spec` door. Prefer `list_fields`.
 **Recommendations and experiments**
 - Open recommendations: `list_recommendations`; as cards to act on: `show_recommendations`
 - Create one: `create_recommendation`
-- Dismiss one: `dismiss_recommendation`
-- Mark one followed: `mark_recommendation_done`
+- Dismiss one: `dismiss_recommendation`. Mark one followed: `mark_recommendation_done`
 - Concluded experiments and their verdicts: `list_recommendations` with `status="concluded"`
 
 **Account inventory**
@@ -108,8 +109,7 @@ the `spec` door. Prefer `list_fields`.
   add them to TrustData's numbers or present the two as the same count.
 
 **Change ledger**
-- Known annotations: `list_change_events`
-- Record a change you made: `create_change_event`
+- Known annotations: `list_change_events`. Record a change you made: `create_change_event`
 
 **Custom fields**
 - See them: `list_custom_fields`. Register a param: `add_custom_field`. Remove one: `remove_custom_field`.
