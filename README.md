@@ -30,7 +30,7 @@ Each of the other integrations takes:
 
 ## Releases
 
-Tagged releases publish pre-built artifacts (Worker bundle, plugin `.zip` files) to the [Releases page](https://github.com/trstdata/trustdata-integrations/releases). Artifacts are signed and checksummed; see [SECURITY.md](./SECURITY.md) for verification.
+Tagged releases publish the plugin `.zip` files to the [Releases page](https://github.com/trstdata/trustdata-integrations/releases). Artifacts are signed and checksummed; see [SECURITY.md](./SECURITY.md) for verification.
 
 If you don't want to build from source:
 

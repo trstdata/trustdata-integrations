@@ -18,7 +18,7 @@ Every release on the [Releases page](https://github.com/trstdata/trustdata-integ
 
 - The artifact (e.g. `trustdata-woocommerce-1.2.3.zip`)
 - A SHA-256 checksum (`trustdata-woocommerce-1.2.3.zip.sha256`)
-- A cosign signature (`trustdata-woocommerce-1.2.3.zip.sig`) and public key
+- A cosign bundle (`trustdata-woocommerce-1.2.3.zip.sigstore.json`), which holds the signature and its certificate
 
 To verify:
 
@@ -30,7 +30,7 @@ sha256sum -c trustdata-woocommerce-1.2.3.zip.sha256
 cosign verify-blob \
   --certificate-identity-regexp 'https://github.com/trstdata/trustdata-integrations/.github/workflows/release.yml@.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --signature trustdata-woocommerce-1.2.3.zip.sig \
+  --bundle trustdata-woocommerce-1.2.3.zip.sigstore.json \
   trustdata-woocommerce-1.2.3.zip
 ```
 
