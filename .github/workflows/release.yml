@@ -1,0 +1,112 @@
+# Publishes a plugin zip to the Releases page when a plugin tag is pushed.
+#
+#   git tag woocommerce-v1.0.0 && git push origin woocommerce-v1.0.0
+#   git tag prestashop-v1.0.0  && git push origin prestashop-v1.0.0
+#
+# The tag's version must equal the version the plugin declares, or the job
+# fails before it builds anything. Each release holds three files, the ones
+# SECURITY.md tells a customer how to verify:
+#
+#   trustdata-woocommerce-1.0.0.zip                the plugin, as WordPress installs it
+#   trustdata-woocommerce-1.0.0.zip.sha256         its checksum
+#   trustdata-woocommerce-1.0.0.zip.sigstore.json  its cosign bundle
+#
+# Signing is keyless: cosign gets a short-lived certificate for this workflow's
+# identity through GitHub OIDC, so no signing key exists in this repo. The file
+# name `release.yml` is part of that identity, and SECURITY.md verifies against
+# it. Renaming this file breaks every customer's verify command.
+name: Release plugins
+
+on:
+  push:
+    tags:
+      - "woocommerce-v*"
+      - "prestashop-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, sign and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
+      id-token: write # cosign keyless signing
+    steps:
+      - uses: actions/checkout@v7
+
+      # The tag name reaches the shell through the environment, never through
+      # a workflow expression inside `run`.
+      - name: Read the plugin and its version from the tag
+        id: meta
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          case "$TAG" in
+            woocommerce-v*)
+              version="${TAG#woocommerce-v}"
+              parent=woocommerce
+              folder=trustdata-woocommerce
+              asset="trustdata-woocommerce-${version}.zip"
+              title="WooCommerce plugin ${version}"
+              declared="$(sed -n 's/^ \* Version: *//p' woocommerce/trustdata-woocommerce/trustdata-woocommerce.php)"
+              ;;
+            prestashop-v*)
+              version="${TAG#prestashop-v}"
+              parent=prestashop
+              folder=trustdata
+              asset="trustdata-${version}.zip"
+              title="PrestaShop module ${version}"
+              declared="$(sed -n 's/.*<version><!\[CDATA\[\(.*\)\]\]><\/version>.*/\1/p' prestashop/trustdata/config.xml)"
+              ;;
+            *)
+              echo "::error::Unexpected tag $TAG"
+              exit 1
+              ;;
+          esac
+          if [ -z "$declared" ] || [ "$declared" != "$version" ]; then
+            echo "::error::Tag $TAG says ${version}. The plugin declares '${declared}'. Change the plugin's version first, then tag."
+            exit 1
+          fi
+          {
+            echo "parent=$parent"
+            echo "folder=$folder"
+            echo "asset=$asset"
+            echo "title=$title"
+          } >> "$GITHUB_OUTPUT"
+
+      # The zip holds the plugin's folder at its top level. WordPress and
+      # PrestaShop both install the folder they find there.
+      - name: Build the zip and its checksum
+        env:
+          PARENT: ${{ steps.meta.outputs.parent }}
+          FOLDER: ${{ steps.meta.outputs.folder }}
+          ASSET: ${{ steps.meta.outputs.asset }}
+        run: |
+          mkdir dist
+          (cd "$PARENT" && zip -r -X "$GITHUB_WORKSPACE/dist/$ASSET" "$FOLDER")
+          (cd dist && sha256sum "$ASSET" > "$ASSET.sha256")
+          unzip -l "dist/$ASSET"
+
+      - uses: sigstore/cosign-installer@v4
+
+      - name: Sign the zip
+        env:
+          ASSET: ${{ steps.meta.outputs.asset }}
+        run: cosign sign-blob --yes --bundle "dist/$ASSET.sigstore.json" "dist/$ASSET"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          TITLE: ${{ steps.meta.outputs.title }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --verify-tag \
+            --title "$TITLE" \
+            --notes "Install steps and verification: see README.md and SECURITY.md."
