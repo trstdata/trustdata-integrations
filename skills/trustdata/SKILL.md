@@ -70,8 +70,8 @@ The tool list marks each tool read-only, write or destructive. After a recommend
 - Anomaly investigations and their verdicts: `list_signals` with `kind` anomaly
 - One investigation in full: `get_investigation`
 - Ask about the evidence already gathered: `ask_investigation`
-- Request an extra data check: `ask_investigation_followup`
 - Report whether a diagnosis was right: `submit_verdict`
+- `ask_investigation_followup` always refuses — use `ask_investigation` instead
 
 **The plan**
 - The active strategy, its target, and how the period is pacing: `get_strategy`
